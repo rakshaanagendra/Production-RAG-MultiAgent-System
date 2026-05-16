@@ -7,8 +7,15 @@ __pycache__/
 
 # Virtual Environment
 venv/
+rag/
 .env/
 .venv/
+rag-pipeline/pyvenv.cfg
+rag-pipeline/Lib/
+rag-pipeline/Scripts/
+rag-pipeline/Include/
+rag-pipeline/share/
+rag-pipeline/etc/
 
 # Jupyter
 .ipynb_checkpoints/

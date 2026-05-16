@@ -6,7 +6,8 @@
     {
       "root": ".",
       "extraPaths": [
-        "rag/Lib/site-packages"
+        "rag-pipeline",
+        "rag-pipeline/Lib/site-packages"
       ]
     }
   ]

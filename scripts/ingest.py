@@ -3,12 +3,13 @@ from pathlib import Path
 
 # Allow running this file directly: `python scripts/ingest.py`
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+PIPELINE_ROOT = PROJECT_ROOT / "rag-pipeline"
+if str(PIPELINE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PIPELINE_ROOT))
 
-from rag.ingestion.loader import load_documents
-from rag.ingestion.chunker import chunk_documents
-from rag.ingestion.embedder import embed_chunks
+from ingestion.loader import load_documents
+from ingestion.chunker import chunk_documents
+from ingestion.embedder import embed_chunks
 from vectorstore.faiss_indexer import build_faiss_index, save_index
 
 
