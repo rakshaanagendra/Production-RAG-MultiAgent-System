@@ -1,5 +1,9 @@
 #### LLM-Powered RAG Assistant
 
+![Python](https://img.shields.io/badge/Python-3.10+-blue)
+![Docker](https://img.shields.io/badge/Docker-supported-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 # Quick Start
 
 ## Clone Repository
