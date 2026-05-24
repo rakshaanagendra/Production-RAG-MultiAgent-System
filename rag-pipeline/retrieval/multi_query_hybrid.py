@@ -90,6 +90,111 @@ class MultiQueryHybridRetriever:
 
         return balanced
 
+    def _compute_retrieval_health(self, diagnostics: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Combine retrieval diagnostics into one health decision.
+        Returns:
+            {
+                "is_weak": bool,
+                "severity": "strong" | "medium" | "weak",
+                "risk_score": float,
+                "reasons": list[str],
+                "summary": dict
+            }
+        """
+        rerank_scores = diagnostics.get("rerank_scores", [])
+        duplicate_rate = diagnostics.get("duplicate_rate", 0.0)
+        source_diversity = diagnostics.get("source_diversity", 0.0)
+        dominant_source_ratio = diagnostics.get("dominant_source_ratio", 0.0)
+        top3_source_concentration = diagnostics.get("top3_source_concentration", 0.0)
+        lexical_overlap = diagnostics.get("avg_lexical_overlap", 1.0)
+
+        if not rerank_scores:
+            return {
+                "is_weak": True,
+                "severity": "weak",
+                "risk_score": 1.0,
+                "reasons": ["No rerank scores were produced."],
+                "summary": {},
+            }
+
+        avg_score = sum(rerank_scores) / len(rerank_scores)
+        top_score = max(rerank_scores)
+
+        if len(rerank_scores) > 1:
+            sorted_scores = sorted(rerank_scores, reverse=True)
+            score_gap = sorted_scores[0] - sorted_scores[1]
+            mean_score = avg_score
+            variance = sum((s - mean_score) ** 2 for s in rerank_scores) / len(rerank_scores)
+            score_std = variance ** 0.5
+        else:
+            score_gap = top_score
+            score_std = 0.0
+
+        reasons = []
+        risk_score = 0.0
+
+        if avg_score < 0.35:
+            risk_score += 0.30
+            reasons.append(f"Average rerank score is low ({avg_score:.3f}).")
+
+        if top_score < 0.50:
+            risk_score += 0.25
+            reasons.append(f"Top rerank score is weak ({top_score:.3f}).")
+
+        if score_gap < 0.05:
+            risk_score += 0.15
+            reasons.append(f"Rerank scores are flat (top gap {score_gap:.3f}).")
+
+        if score_std < 0.03:
+            risk_score += 0.10
+            reasons.append(f"Rerank scores have very low spread (std {score_std:.3f}).")
+
+        if duplicate_rate > 0.40:
+            risk_score += 0.15
+            reasons.append(f"Duplicate rate is high ({duplicate_rate:.2%}).")
+
+        if source_diversity < 0.40:
+            risk_score += 0.10
+            reasons.append(f"Source diversity is low ({source_diversity:.3f}).")
+
+        if dominant_source_ratio > 0.70:
+            risk_score += 0.10
+            reasons.append(f"One source dominates too much ({dominant_source_ratio:.3f}).")
+
+        if top3_source_concentration > 0.85:
+            risk_score += 0.10
+            reasons.append(f"Top-3 sources dominate the context ({top3_source_concentration:.3f}).")
+
+        if lexical_overlap < 0.20:
+            risk_score += 0.15
+            reasons.append(f"Lexical overlap is weak ({lexical_overlap:.3f}).")
+
+        risk_score = min(risk_score, 1.0)
+
+        if risk_score >= 0.60:
+            severity = "weak"
+            is_weak = True
+        elif risk_score >= 0.30:
+            severity = "medium"
+            is_weak = False
+        else:
+            severity = "strong"
+            is_weak = False
+
+        return {
+            "is_weak": is_weak,
+            "severity": severity,
+            "risk_score": round(risk_score, 3),
+            "reasons": reasons,
+            "summary": {
+                "avg_score": round(avg_score, 3),
+                "top_score": round(top_score, 3),
+                "score_gap": round(score_gap, 3),
+                "score_std": round(score_std, 3),
+            },
+        }
+
     def build_context(
         self,
         chunks: List[Dict[str, Any]],
@@ -332,6 +437,72 @@ class MultiQueryHybridRetriever:
         def _normalize_text(text: str) -> str:
             return re.sub(r"\s+", " ", text.strip().lower())
 
+        def _tokenize(text: str):
+            STOPWORDS = {
+                "a", "an", "the", "is", "are", "was", "were",
+                "what", "how", "why", "when", "where",
+                "and", "or", "but", "if", "then",
+                "of", "in", "on", "to", "for", "with",
+                "do", "does", "did", "they", "them", "their",
+                "this", "that", "these", "those", "the", "like", " ",
+                "it", "its", "as", "at", "by",
+                "from", "about", "into", "through",
+                "can", "could", "would", "should",
+                "be", "been", "being",
+                "vs", "versus"
+            }
+
+            tokens = re.findall(r"\b[a-z0-9]+\b", text.lower())
+            filtered_tokens = [token for token in tokens if token not in STOPWORDS]
+            return set(filtered_tokens)
+
+        def _compute_lexical_overlap(query_text: str, chunks, top_n: int = 5):
+            """
+            Measures how much of the query vocabulary appears in retrieved chunks.
+
+            overlap = shared_query_tokens / total_query_tokens
+            """
+            query_tokens = _tokenize(query_text)
+
+            if not query_tokens or not chunks:
+                return {
+                    "average_lexical_overlap": 0.0,
+                    "best_lexical_overlap": 0.0,
+                    "per_chunk": [],
+                }
+
+            per_chunk = []
+
+            for rank, chunk in enumerate(chunks[:top_n], start=1):
+                chunk_text = chunk.get("text", "")
+                chunk_tokens = _tokenize(chunk_text)
+
+                if not chunk_tokens:
+                    overlap = 0.0
+                else:
+                    shared = query_tokens & chunk_tokens
+                    overlap = len(shared) / len(query_tokens)
+
+                per_chunk.append(
+                    {
+                        "rank": rank,
+                        "source": _chunk_source(chunk),
+                        "overlap": round(overlap, 4),
+                        "shared_terms": sorted(list(query_tokens & chunk_tokens))[:10],
+                        "query_token_count": len(query_tokens),
+                        "chunk_token_count": len(chunk_tokens),
+                    }
+                )
+
+            avg_overlap = sum(item["overlap"] for item in per_chunk) / len(per_chunk)
+            best_overlap = max(item["overlap"] for item in per_chunk)
+
+            return {
+                "average_lexical_overlap": round(avg_overlap, 4),
+                "best_lexical_overlap": round(best_overlap, 4),
+                "per_chunk": per_chunk,
+            }
+
         def _compute_duplicate_stats(query_results):
             all_chunks = [
                 chunk
@@ -354,7 +525,10 @@ class MultiQueryHybridRetriever:
             duplicate_candidates = 0
 
             for chunk in all_chunks:
-                key = _normalize_text(chunk["text"])
+                # Normalize to a hashable representation (frozenset of tokens)
+                token_set = _normalize_text(chunk["text"])
+                key = frozenset(token_set)
+
                 if key in seen:
                     duplicate_candidates += 1
                 else:
@@ -522,6 +696,12 @@ class MultiQueryHybridRetriever:
             top_k=final_k,
         )
 
+        lexical_overlap_stats = _compute_lexical_overlap(
+            query_text=query,
+            chunks=reranked,
+            top_n=context_top_k,
+        )
+
         rerank_lift = _compute_rerank_lift(merged_before_rerank, reranked)
 
         context = self.build_context(
@@ -544,6 +724,21 @@ class MultiQueryHybridRetriever:
         "context": _compute_source_diversity(context_chunks),
     }
 
+        rerank_scores = [c.get("rerank_score", 0.0) for c in reranked]
+        source_div_context = source_diversity["context"]
+        merged_div_context = source_diversity["merged"]
+
+        retrieval_health_input = {
+            "rerank_scores": rerank_scores,
+            "duplicate_rate": duplicate_stats["duplicate_rate"],
+            "source_diversity": merged_div_context["dominant_ratio"],
+            "dominant_source_ratio": merged_div_context["dominant_ratio"],
+            "top3_source_concentration": merged_div_context["top_k_ratio"],
+            "avg_lexical_overlap": lexical_overlap_stats["average_lexical_overlap"],
+        }
+
+        retrieval_health = self._compute_retrieval_health(retrieval_health_input)
+
         diagnostics = {
             "query": query,
             "expanded_queries": expanded_queries,
@@ -552,6 +747,8 @@ class MultiQueryHybridRetriever:
             "rerank_lift": rerank_lift,
             "metadata_coverage": metadata_coverage,
             "source_diversity": source_diversity,
+            "retrieval_health": retrieval_health,
+            "lexical_overlap": lexical_overlap_stats,
             "per_query_results": [
                 {
                     "query": item["query"],
@@ -616,46 +813,60 @@ class MultiQueryHybridRetriever:
         print(f"  Duplicate candidates: {dup['duplicate_candidates']}")
         print(f"  Duplicate rate: {dup['duplicate_rate']:.4f}")
 
-        print("\nRERANK LIFT:")
-        lift = diag["rerank_lift"]
-        print(f"  Compared candidates: {lift['compared_candidates']}")
-        print(f"  Average lift: {lift['average_lift']:.2f}")
-        print(f"  Average absolute lift: {lift['average_abs_lift']:.2f}")
-        print(f"  Promoted: {lift['promoted']}")
-        print(f"  Demoted: {lift['demoted']}")
-        print(f"  Unchanged: {lift['unchanged']}")
+        # print("\nRERANK LIFT:")
+        # lift = diag["rerank_lift"]
+        # print(f"  Compared candidates: {lift['compared_candidates']}")
+        # print(f"  Average lift: {lift['average_lift']:.2f}")
+        # print(f"  Average absolute lift: {lift['average_abs_lift']:.2f}")
+        # print(f"  Promoted: {lift['promoted']}")
+        # print(f"  Demoted: {lift['demoted']}")
+        # print(f"  Unchanged: {lift['unchanged']}")
 
-        print("\nTOP GAINS:")
-        if lift["top_gains"]:
-            for idx, item in enumerate(lift["top_gains"], start=1):
-                print(f"\n[GAIN {idx}]")
-                print(f"Source: {item['source']}")
-                print(f"Before Rank: {item['before_rank']}")
-                print(f"After Rank: {item['after_rank']}")
-                print(f"Lift: +{item['lift']}")
-                print(f"Rerank Score: {item['rerank_score']:.4f}")
-                print(f"RRF Score: {item['rrf_score']:.6f}")
-                print("Preview:")
-                print(item["text_preview"])
-                print("-" * 60)
-        else:
-            print("None")
+        # print("\nTOP GAINS:")
+        # if lift["top_gains"]:
+        #     for idx, item in enumerate(lift["top_gains"], start=1):
+        #         print(f"\n[GAIN {idx}]")
+        #         print(f"Source: {item['source']}")
+        #         print(f"Before Rank: {item['before_rank']}")
+        #         print(f"After Rank: {item['after_rank']}")
+        #         print(f"Lift: +{item['lift']}")
+        #         print(f"Rerank Score: {item['rerank_score']:.4f}")
+        #         print(f"RRF Score: {item['rrf_score']:.6f}")
+        #         print("Preview:")
+        #         print(item["text_preview"])
+        #         print("-" * 60)
+        # else:
+        #     print("None")
 
-        print("\nTOP LOSSES:")
-        if lift["top_losses"]:
-            for idx, item in enumerate(lift["top_losses"], start=1):
-                print(f"\n[LOSS {idx}]")
-                print(f"Source: {item['source']}")
-                print(f"Before Rank: {item['before_rank']}")
-                print(f"After Rank: {item['after_rank']}")
-                print(f"Lift: {item['lift']}")
-                print(f"Rerank Score: {item['rerank_score']:.4f}")
-                print(f"RRF Score: {item['rrf_score']:.6f}")
-                print("Preview:")
-                print(item["text_preview"])
-                print("-" * 60)
+        # print("\nTOP LOSSES:")
+        # if lift["top_losses"]:
+        #     for idx, item in enumerate(lift["top_losses"], start=1):
+        #         print(f"\n[LOSS {idx}]")
+        #         print(f"Source: {item['source']}")
+        #         print(f"Before Rank: {item['before_rank']}")
+        #         print(f"After Rank: {item['after_rank']}")
+        #         print(f"Lift: {item['lift']}")
+        #         print(f"Rerank Score: {item['rerank_score']:.4f}")
+        #         print(f"RRF Score: {item['rrf_score']:.6f}")
+        #         print("Preview:")
+        #         print(item["text_preview"])
+        #         print("-" * 60)
+        # else:
+        #     print("None")
+
+        print("\nRETRIEVAL HEALTH:")
+        health = diag.get("retrieval_health", {})
+        print(f"  Severity: {health.get('severity', 'unknown')}")
+        print(f"  Risk score: {health.get('risk_score', 0.0)}")
+        print(f"  Is weak: {health.get('is_weak', False)}")
+
+        reasons = health.get("reasons", [])
+        if reasons:
+            print("  Reasons:")
+            for reason in reasons:
+                print(f"    - {reason}")
         else:
-            print("None")
+            print("  Reasons: none")
 
         print("\nMETADATA COVERAGE:")
 
@@ -665,6 +876,23 @@ class MultiQueryHybridRetriever:
                 print(
                     f"  {field}: {stats['present']}/{stats['total']} "
                     f"({stats['coverage_rate']:.4f})"
+                )
+
+        print("\nLEXICAL OVERLAP:")
+
+        lex = diag.get("lexical_overlap", {})
+        print(f"  Average lexical overlap: {lex.get('average_lexical_overlap', 0.0):.4f}")
+        print(f"  Best lexical overlap: {lex.get('best_lexical_overlap', 0.0):.4f}")
+
+        per_chunk = lex.get("per_chunk", [])
+        if per_chunk:
+            print("  Per chunk:")
+            for item in per_chunk:
+                print(
+                    f"    Chunk {item['rank']} | "
+                    f"Source: {item['source']} | "
+                    f"Overlap: {item['overlap']:.4f} | "
+                    f"Shared terms: {item['shared_terms']}"
                 )
 
         print("\nSOURCE DIVERSITY:")
@@ -684,67 +912,67 @@ class MultiQueryHybridRetriever:
             for source, count in stage["source_distribution"].items():
                 print(f"    {source}: {count}")
 
-        print("\n==================================================")
-        print("PER-QUERY RETRIEVAL")
-        print("==================================================")
+        # print("\n==================================================")
+        # print("PER-QUERY RETRIEVAL")
+        # print("==================================================")
 
-        for i, item in enumerate(diag["per_query_results"], start=1):
-            print(f"\nQUERY VARIANT [{i}]")
-            print(f"Query: {item['query']}")
-            print(f"Retrieved Count: {item['count']}")
+        # for i, item in enumerate(diag["per_query_results"], start=1):
+        #     print(f"\nQUERY VARIANT [{i}]")
+        #     print(f"Query: {item['query']}")
+        #     print(f"Retrieved Count: {item['count']}")
 
-            print("\nSources:")
-            for s in item["sources"]:
-                print(f"  - {s}")
+        #     print("\nSources:")
+        #     for s in item["sources"]:
+        #         print(f"  - {s}")
 
-            print("\nSource Distribution:")
-            for source, count in item["source_distribution"].items():
-                print(f"  {source}: {count}")
+        #     print("\nSource Distribution:")
+        #     for source, count in item["source_distribution"].items():
+        #         print(f"  {source}: {count}")
 
-            print(f"\nTop Cosine Scores: {item['top_cosine_scores']}")
-            print(f"Top RRF Scores: {item['top_rrf_scores']}")
+        #     print(f"\nTop Cosine Scores: {item['top_cosine_scores']}")
+        #     print(f"Top RRF Scores: {item['top_rrf_scores']}")
 
-        print("\n==================================================")
-        print("MERGED RESULTS")
-        print("==================================================")
+        # print("\n==================================================")
+        # print("MERGED RESULTS")
+        # print("==================================================")
 
-        merged = diag["merged_results"]
+        # merged = diag["merged_results"]
 
-        print(f"Merged Candidate Count: {merged['count']}")
+        # print(f"Merged Candidate Count: {merged['count']}")
 
-        print("\nMerged Source Distribution:")
-        for source, count in merged["source_distribution"].items():
-            print(f"  {source}: {count}")
+        # print("\nMerged Source Distribution:")
+        # for source, count in merged["source_distribution"].items():
+        #     print(f"  {source}: {count}")
 
-        print(f"\nTop Multi-Query RRF Scores:")
-        print(merged["top_multi_query_rrf_scores"])
+        # print(f"\nTop Multi-Query RRF Scores:")
+        # print(merged["top_multi_query_rrf_scores"])
 
-        print("\n==================================================")
-        print("RERANKED RESULTS")
-        print("==================================================")
+        # print("\n==================================================")
+        # print("RERANKED RESULTS")
+        # print("==================================================")
 
-        reranked = diag["reranked_results"]
+        # reranked = diag["reranked_results"]
 
-        print(f"Reranked Count: {reranked['count']}")
+        # print(f"Reranked Count: {reranked['count']}")
 
-        print("\nReranked Source Distribution:")
-        for source, count in reranked["source_distribution"].items():
-            print(f"  {source}: {count}")
+        # print("\nReranked Source Distribution:")
+        # for source, count in reranked["source_distribution"].items():
+        #     print(f"  {source}: {count}")
 
-        print(f"\nTop Rerank Scores:")
-        print(reranked["top_rerank_scores"])
+        # print(f"\nTop Rerank Scores:")
+        # print(reranked["top_rerank_scores"])
 
-        print("\n==================================================")
-        print("FINAL CONTEXT SUMMARY")
-        print("==================================================")
+        # print("\n==================================================")
+        # print("FINAL CONTEXT SUMMARY")
+        # print("==================================================")
 
-        context = diag["context_summary"]
+        # context = diag["context_summary"]
 
-        print(f"Context Chunk Count: {context['count']}")
+        # print(f"Context Chunk Count: {context['count']}")
 
-        print("\nContext Sources:")
-        for source, count in context["source_distribution"].items():
-            print(f"  {source}: {count}")
+        # print("\nContext Sources:")
+        # for source, count in context["source_distribution"].items():
+        #     print(f"  {source}: {count}")
 
 ## Basic test cases for MultiQueryHybridRetriever
 # if __name__ == "__main__":
