@@ -90,6 +90,26 @@ class MultiQueryHybridRetriever:
 
         return balanced
 
+    # After reranking, we may want to enforce a hard cap on how many chunks from the same source can appear in the final context.
+    def _apply_source_cap(self, chunks, max_per_source: Optional[int]):
+        if max_per_source is None:
+            return chunks
+
+        selected = []
+        counts = {}
+
+        for chunk in chunks:
+            source = chunk.get("source") or chunk.get("metadata", {}).get("source") or "unknown"
+            count = counts.get(source, 0)
+
+            if count >= max_per_source:
+                continue
+
+            counts[source] = count + 1
+            selected.append(chunk)
+
+        return selected
+
     def _compute_retrieval_health(self, diagnostics: Dict[str, Any]) -> Dict[str, Any]:
         """
         Combine retrieval diagnostics into one health decision.
@@ -696,6 +716,9 @@ class MultiQueryHybridRetriever:
             top_k=final_k,
         )
 
+        # Before, reranked could still leave repeated sources in the final list but now after reranking final list will be trimmed so each source appears at most max_per_source times
+        reranked = self._apply_source_cap(reranked, max_per_source)
+
         lexical_overlap_stats = _compute_lexical_overlap(
             query_text=query,
             chunks=reranked,
@@ -858,6 +881,8 @@ class MultiQueryHybridRetriever:
             policy["num_queries"] = min(policy["num_queries"] + 1, 6)
             policy["retrieve_k"] = max(policy["retrieve_k"], int(retrieve_k * 1.40))
             policy["final_k"] = max(policy["final_k"], int(final_k * 1.20))
+            # Force stronger source diversity balancing on retry if not already at 1
+            policy["max_per_source"] = 1
             decision_trace.append(
                 {
                     "reason": "Low source diversity",
@@ -890,6 +915,17 @@ class MultiQueryHybridRetriever:
             "policy": policy,
             "decision_trace": decision_trace,
         }
+
+    # Build a mapping from retrieval health severity to context construction parameters like how many chunks to include in the final context and how many top reranked chunks to consider when building the context.
+    def _choose_context_sizes(self, health: Dict[str, Any]) -> Dict[str, int]:
+        severity = health.get("severity", "medium")
+
+        if severity == "strong":
+            return {"final_k": 5, "context_top_k": 3}
+        elif severity == "medium":
+            return {"final_k": 10, "context_top_k": 5}
+        else:
+            return {"final_k": 15, "context_top_k": 7}
 
     # Adaptive retrieval controller with retry logic based on diagnostics
     def adaptive_search_with_retry(
@@ -948,9 +984,20 @@ class MultiQueryHybridRetriever:
         initial_health = initial_result["diagnostics"].get("retrieval_health", {})
         is_weak = initial_health.get("is_weak", False)
 
+        # System does not always need the same amount of context as too little context misses evidence
+        # too much context adds noise
+        # the right amount depends on retrieval quality
+        # added dynamic context sizing which chooses how many chunks to include in the final context 
+        # and how many top reranked chunks to consider when building the context based on the initial retrieval health assessment
+        size_policy = self._choose_context_sizes(initial_health)
+        chosen_final_k = size_policy["final_k"]
+        chosen_context_top_k = size_policy["context_top_k"]
+
         # If not weak, no retry.
         if not is_weak:
             return {
+                "chosen_final_k": chosen_final_k,
+                "chosen_context_top_k": chosen_context_top_k,
                 "used_retry": False,
                 "retry_params": None,
                 "initial_result": initial_result,
@@ -975,7 +1022,7 @@ class MultiQueryHybridRetriever:
             query=query,
             num_queries=retry_policy["num_queries"],
             retrieve_k=retry_policy["retrieve_k"],
-            final_k=retry_policy["final_k"],
+            final_k=chosen_final_k,
             k=k,
             dense_weight=retry_policy["dense_weight"],
             sparse_weight=retry_policy["sparse_weight"],
@@ -983,17 +1030,19 @@ class MultiQueryHybridRetriever:
             min_dense_similarity=min_dense_similarity,
             min_bm25_score=min_bm25_score,
             max_per_source=retry_policy["max_per_source"],
-            context_top_k=context_top_k,
+            context_top_k=chosen_context_top_k,
             include_scores=include_scores,
         )
 
         return {
             "used_retry": True,
             "decision_trace": decision_trace,
+            "chosen_final_k": chosen_final_k,
+            "chosen_context_top_k": chosen_context_top_k,
             "retry_params": {
                 "num_queries": retry_policy["num_queries"],
                 "retrieve_k": retry_policy["retrieve_k"],
-                "final_k": retry_policy["final_k"],
+                "final_k": chosen_final_k,
                 "dense_weight": retry_policy["dense_weight"],
                 "sparse_weight": retry_policy["sparse_weight"],
                 "max_per_source": retry_policy["max_per_source"],
@@ -1197,6 +1246,13 @@ class MultiQueryHybridRetriever:
         )
 
         print("\n==================================================")
+        print("DYNAMIC CONTEXT SIZING POLICY")
+        print("==================================================")
+
+        print(f"  chosen_final_k: {adaptive_result.get('chosen_final_k')}")
+        print(f"  chosen_context_top_k: {adaptive_result.get('chosen_context_top_k')}")
+
+        print("\n==================================================")
         print("ADAPTIVE RETRIEVAL")
         print("==================================================")
         print(f"Used retry: {adaptive_result['used_retry']}")
@@ -1215,7 +1271,7 @@ class MultiQueryHybridRetriever:
                     print(f"\n[{i}] {step['reason']}")
 
                     for action in step["actions"]:
-                        print(f"    ->{action}")
+                        print(f"    -> {action}")
 
         print("\nINITIAL HEALTH")
         print(f"  Severity: {initial_health.get('severity', 'unknown')}")
