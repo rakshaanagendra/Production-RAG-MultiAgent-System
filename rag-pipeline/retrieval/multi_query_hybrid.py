@@ -2054,7 +2054,7 @@ if __name__ == "__main__":
         #     context_top_k=5,
         # )
 
-        # For demonstration, we'll call the adaptive search which includes diagnostics and potential retry logic
+        # For demonstration, we will call the adaptive search which includes diagnostics and potential retry logic
         result = multi_query_retriever.adaptive_search_with_retry(
             query,
             num_queries=4,
@@ -2063,16 +2063,52 @@ if __name__ == "__main__":
             context_top_k=5,
         )
 
-        multi_query_retriever.print_adaptive_result(result)
-
         generator = Generator()
 
-        # Use the result returned from adaptive_search_with_retry
-        answer = generator.generate(
+        original_context = result["final_result"]["context"]
+
+        compressed_context = generator.compress_context(
             query=query,
             context=result["final_result"]["context"],
-            confidence_route=result.get("confidence_route")
+            confidence_route=result.get("confidence_route", {}),
         )
+
+
+
+        multi_query_retriever.print_adaptive_result(result)
+
+        print("\n==================================================")
+        print("BEFORE COMPRESSION")
+        print("\n==================================================")
+        print(original_context)
+
+        print("\n==================================================")
+        print("AFTER COMPRESSION / PROMPT-READY CONTEXT")
+        print("\n==================================================")
+        print(compressed_context)
+
+        print("\n=== LENGTH COMPARISON ===")
+
+        original_len = len(original_context)
+        compressed_len = len(compressed_context)
+
+        reduction = original_len - compressed_len
+        reduction_pct = (reduction / original_len * 100) if original_len > 0 else 0
+
+        print(f"Original length   : {original_len}")
+        print(f"Compressed length : {compressed_len}")
+        print(f"Reduction         : {reduction}")
+        print(f"Reduction %       : {reduction_pct:.2f}%")
+
+
+        # Use the compressed context for answer generation to simulate the full pipeline 
+        # and see how the confidence route info can be passed to the generator for potential answer-level adjustments
+        answer = generator.generate(
+            query=query,
+            context=compressed_context,
+            confidence_route=result.get("confidence_route", {}),
+            already_compressed=True,
+)
 
         # final_result = result["final_result"]
 
@@ -2094,11 +2130,7 @@ if __name__ == "__main__":
 
         #     print("-" * 80)
 
-        print("\n==================================================")
-        print("PROMPT-READY CONTEXT")
-        print("==================================================")
 
-        print(result["final_result"]["context"])
 
         print("\n==================================================")
         print("FINAL LLM ANSWER")
