@@ -625,29 +625,53 @@ if __name__ == "__main__":
     retriever = Retriever()
     rewriter = QueryRewriter()
 
-    query = "What is dense and sparse retrieval?"
+    query = "When was RAG introduced?"
 
-    output = retriever.compare_hybrid_rewrite(query, final_k=10, rewriter=rewriter)
+    dense_results = retriever.search(query, top_k=10)
 
-    print("\n================ ORIGINAL QUERY ================\n")
-    print(output["original_query"])
+    print("DENSE")
+    for r in dense_results[:10]:
+        print(r.get("source", "unknown"))
+        print(r.get("text", "")[:200])
 
-    print("\n================ REWRITTEN QUERY ================\n")
-    print(output["rewritten_query"])
+    bm25_results = retriever.sparse.search(query, top_k=10)
 
-    print_diagnostics("ORIGINAL", output["hybrid_original"]["diagnostics"])
-    print_diagnostics("REWRITTEN", output["hybrid_rewritten"]["diagnostics"])
+    print("BM25")
+    for r in bm25_results[:10]:
+        print(r.get("source", "unknown"))
+        print(r.get("text", "")[:200])
 
-    print("\n================ HYBRID RESULTS (ORIGINAL) ================\n")
-    original_results = output["hybrid_original"]["results"]
-    for i, c in enumerate(original_results, start=1):
-        print(f"[{i}] source={c.get('source', 'unknown')}")
-        print(c.get("text", "")[:300])
-        print("-" * 80)
+    # results = retriever.hybrid_search(query, retrieve_k=10, final_k=10)
 
-    print("\n================ HYBRID RESULTS (REWRITTEN) ================\n")
-    rewritten_results = output["hybrid_rewritten"]["results"]
-    for i, c in enumerate(rewritten_results, start=1):
-        print(f"[{i}] source={c.get('source', 'unknown')}")
-        print(c.get("text", "")[:300])
-        print("-" * 80)
+    # for i, r in enumerate(results[:10]):
+    #     print(i)
+    #     print(r["source"])
+    #     print(r["text"][:300])
+    
+
+    # query = "What is dense and sparse retrieval?"
+
+    # output = retriever.compare_hybrid_rewrite(query, final_k=10, rewriter=rewriter)
+
+    # print("\n================ ORIGINAL QUERY ================\n")
+    # print(output["original_query"])
+
+    # print("\n================ REWRITTEN QUERY ================\n")
+    # print(output["rewritten_query"])
+
+    # print_diagnostics("ORIGINAL", output["hybrid_original"]["diagnostics"])
+    # print_diagnostics("REWRITTEN", output["hybrid_rewritten"]["diagnostics"])
+
+    # print("\n================ HYBRID RESULTS (ORIGINAL) ================\n")
+    # original_results = output["hybrid_original"]["results"]
+    # for i, c in enumerate(original_results, start=1):
+    #     print(f"[{i}] source={c.get('source', 'unknown')}")
+    #     print(c.get("text", "")[:300])
+    #     print("-" * 80)
+
+    # print("\n================ HYBRID RESULTS (REWRITTEN) ================\n")
+    # rewritten_results = output["hybrid_rewritten"]["results"]
+    # for i, c in enumerate(rewritten_results, start=1):
+    #     print(f"[{i}] source={c.get('source', 'unknown')}")
+    #     print(c.get("text", "")[:300])
+    #     print("-" * 80)

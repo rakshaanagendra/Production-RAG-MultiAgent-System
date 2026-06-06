@@ -20,11 +20,49 @@ def clean_text(text):
     return "\n".join(lines).strip()
 
 
-def is_weak_chunk(chunk):
-    text = chunk.strip().lower()
+def split_paragraphs(text):
+    return [part.strip() for part in re.split(r"\n\s*\n+", text) if part.strip()]
 
-    if len(text) < 100:
+
+def merge_short_paragraphs(paragraphs, min_words=25):
+    merged = []
+    buffer = []
+    buffer_word_count = 0
+
+    for paragraph in paragraphs:
+        word_count = len(re.findall(r"\b\w+\b", paragraph))
+
+        if word_count < min_words:
+            buffer.append(paragraph)
+            buffer_word_count += word_count
+            continue
+
+        if buffer:
+            merged.append("\n\n".join(buffer))
+            buffer = []
+            buffer_word_count = 0
+
+        merged.append(paragraph)
+
+    if buffer:
+        merged.append("\n\n".join(buffer))
+
+    return merged
+
+
+def is_weak_chunk(chunk):
+    text = chunk.strip()
+    word_count = len(re.findall(r"\b\w+\b", text))
+    alpha_count = sum(1 for char in text if char.isalpha())
+    alpha_ratio = (alpha_count / len(text)) if text else 0.0
+
+    if word_count < 8:
         return True
+
+    if alpha_ratio < 0.35:
+        return True
+
+    lowered = text.lower()
 
     weak_patterns = [
         r"^page\s+\d+$",
@@ -53,29 +91,34 @@ def chunk_documents(documents):
 
     for doc_id, doc in enumerate(documents):
         cleaned_text = clean_text(doc["text"])
+        paragraphs = split_paragraphs(cleaned_text)
+        paragraph_blocks = merge_short_paragraphs(paragraphs)
 
-        split_texts = splitter.split_text(cleaned_text)
         chunk_id = 0
 
-        for chunk in split_texts:
-            if is_weak_chunk(chunk):
-                continue
+        for block_index, block in enumerate(paragraph_blocks, start=1):
+            split_texts = splitter.split_text(block)
 
-            chunk_data = {
-                "text": chunk,
-                "source": doc.get("source", "unknown"),
-                "source_path": doc.get("source_path", ""),
-                "doc_type": doc.get("doc_type", "unknown"),
-                "doc_id": doc_id,
-                "chunk_id": chunk_id,
-                "length": len(chunk),
-            }
+            for chunk in split_texts:
+                if is_weak_chunk(chunk):
+                    continue
 
-            chunk_data["page"] = doc.get("page")
-            chunk_data["title"] = doc.get("title")
+                chunk_data = {
+                    "text": chunk,
+                    "source": doc.get("source", "unknown"),
+                    "source_path": doc.get("source_path", ""),
+                    "doc_type": doc.get("doc_type", "unknown"),
+                    "doc_id": doc_id,
+                    "chunk_id": chunk_id,
+                    "length": len(chunk),
+                    "block_id": block_index,
+                }
 
-            chunks.append(chunk_data)
-            chunk_id += 1
+                chunk_data["page"] = doc.get("page")
+                chunk_data["title"] = doc.get("title")
+
+                chunks.append(chunk_data)
+                chunk_id += 1
 
     return chunks
 
@@ -90,6 +133,11 @@ if __name__ == "__main__":
     print(f"Loaded {len(documents)} document(s)")
     print(f"Created {len(chunks)} chunk(s)")
 
-    print("\nSample chunks:")
-    for chunk in chunks[:3]:
+    print("\nAll chunks:")
+    for i, chunk in enumerate(chunks, start=1):
+        print("\n==================================================")
+        print(f"Chunk {i}/{len(chunks)}")
+        print("==================================================")
         print(json.dumps(chunk, ensure_ascii=False, indent=2))
+    
+    

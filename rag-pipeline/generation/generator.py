@@ -44,7 +44,17 @@ class Generator:
         Higher score = more likely to keep.
         """
         sent_terms = self._extract_terms(sentence)
-        overlap_terms = query_terms & sent_terms
+        normalized_query_terms = {
+            t[:-1] if t.endswith("s") else t
+            for t in query_terms
+        }
+
+        normalized_sent_terms = {
+            t[:-1] if t.endswith("s") else t
+            for t in sent_terms
+        }
+
+        overlap_terms = normalized_query_terms & normalized_sent_terms
         overlap = len(overlap_terms)
 
         word_count = len(sentence.split())
@@ -264,6 +274,9 @@ class Generator:
                 - Use ONLY the provided context.
                 - Answer ONLY information explicitly stated in the context.
                 - Do not infer, speculate, or fill gaps.
+                - Author lists, researcher names, paper metadata,
+                  publication details, and titles are valid evidence.
+                - If the answer appears anywhere in the context, extract it and answer.
                 - If any part of the answer is unsupported, say:
                 "I don't know."
                 - Be conservative.
@@ -273,9 +286,14 @@ class Generator:
             instructions = """
                 You are a factual assistant.
 
-                Rules:
-                - If evidence is insufficient, say:
-                "I don't know."
+                 Rules:
+                - Use ONLY the provided context.
+                - If the answer appears in the context,
+                answer it.
+                - Author lists, metadata, paper titles,
+                and publication information count as evidence.
+                - Only say "I don't know" when the answer
+                is genuinely absent from the context.
                 """
 
         prompt = f"""
@@ -335,11 +353,19 @@ ANSWER:
         print(f"Confidence: {confidence}")
         print(f"Action: {action}")
 
-        # LOW confidence -- abstain
-        if action == "retry_or_abstain":
-            return (
+        # LOW confidence -- abstain i.e. adaptive retrieval has already been done based on health check
+        # but the confidence is still low by the time we reach generator.generate() so we abstain
+        #Note that no retries happen in generation
+        self.debug_mode = True
+        if action == "retry_failed_abstain":
+
+            if not self.debug_mode:
+                return (
                 "I do not have enough evidence in the knowledge base "
                 "to answer this question."
+            )
+            print(
+                "WARNING: Low confidence route triggered."
             )
 
         prompt_context = context if already_compressed else self.compress_context(
@@ -354,9 +380,13 @@ ANSWER:
             confidence_level=confidence
         )
 
-        print("\nCOMPRESSED CONTEXT")
-        print("=" * 50)
-        print(prompt_context[:1500])
+        # print("\nCOMPRESSED CONTEXT")
+        # print("=" * 50)
+        # print(prompt_context[:1500])
 
+        print("\n" + "=" * 80)
+        print("FINAL PROMPT")
+        print("=" * 80)
+        print(prompt)
 
         return self._generate(prompt)

@@ -4,8 +4,10 @@ from pathlib import Path
 # Allow running this file directly: `python scripts/ingest.py`
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_ROOT = PROJECT_ROOT / "rag-pipeline"
-if str(PIPELINE_ROOT) not in sys.path:
-    sys.path.insert(0, str(PIPELINE_ROOT))
+
+for path in (str(PROJECT_ROOT), str(PIPELINE_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 from ingestion.loader import load_documents
 from ingestion.chunker import chunk_documents

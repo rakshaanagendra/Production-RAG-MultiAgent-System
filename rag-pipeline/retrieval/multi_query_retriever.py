@@ -133,10 +133,11 @@ if __name__ == "__main__":
     retriever = MultiQueryRetriever()
 
     test_queries = [
-        "What is dense and sparse retrieval?",
-        "that thing where llms forget the middle part",
-        "how do vector databases work",
-        "bm25 vs embeddings",
+        # "What is dense and sparse retrieval?",
+        # "that thing where llms forget the middle part",
+        # "how do vector databases work",
+        # "bm25 vs embeddings",
+        "who invented transformers?"
     ]
 
     for query in test_queries:

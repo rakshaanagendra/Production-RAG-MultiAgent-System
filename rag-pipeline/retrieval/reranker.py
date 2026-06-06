@@ -50,102 +50,121 @@ class Reranker:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Test reranker with optional retrieval step.")
-    parser.add_argument("query", nargs="?", default="What is hybrid search? List the problems and a solution for hybrid search.", help="Query text")
-    parser.add_argument("--retrieve-k", "--retrieve_k", type=int, default=30, help="Number of chunks to retrieve first")
-    parser.add_argument("--top-k", "--top_k", type=int, default=5, help="Number of reranked chunks to return")
-    parser.add_argument(
-        "--preview-chars",
-        "--preview_chars",
-        type=int,
-        default=600,
-        help="Number of characters to print per chunk preview",
-    )
-    parser.add_argument(
-        "--full-text",
-        "--full_text",
-        action="store_true",
-        help="Print full chunk text instead of truncating",
-    )
-    parser.add_argument(
-        "--max-per-source",
-        "--max_per_source",
-        type=int,
-        default=4,
-        help="Cap retrieved chunks per source before reranking",
-    )
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser(description="Test reranker with optional retrieval step.")
+    # parser.add_argument("query", nargs="?", default="What is hybrid search? List the problems and a solution for hybrid search.", help="Query text")
+    # parser.add_argument("--retrieve-k", "--retrieve_k", type=int, default=30, help="Number of chunks to retrieve first")
+    # parser.add_argument("--top-k", "--top_k", type=int, default=5, help="Number of reranked chunks to return")
+    # parser.add_argument(
+    #     "--preview-chars",
+    #     "--preview_chars",
+    #     type=int,
+    #     default=600,
+    #     help="Number of characters to print per chunk preview",
+    # )
+    # parser.add_argument(
+    #     "--full-text",
+    #     "--full_text",
+    #     action="store_true",
+    #     help="Print full chunk text instead of truncating",
+    # )
+    # parser.add_argument(
+    #     "--max-per-source",
+    #     "--max_per_source",
+    #     type=int,
+    #     default=4,
+    #     help="Cap retrieved chunks per source before reranking",
+    # )
+    # args = parser.parse_args()
 
     from retriever import Retriever
 
     retriever = Retriever()
     reranker = Reranker()
 
-    retrieved = retriever.hybrid_search(
-        args.query,
-        retrieve_k=args.retrieve_k,
-        final_k=args.retrieve_k,  # Get more for reranking
-    )
+    # retrieved = retriever.hybrid_search(
+    #     args.query,
+    #     retrieve_k=args.retrieve_k,
+    #     final_k=args.retrieve_k,  # Get more for reranking
+    # )
 
-    # 🔥 ADD THIS FILTER HERE
-    filtered = []
-    for c in retrieved:
-        text = c.get("text", "").lower()
+    # # 🔥 ADD THIS FILTER HERE
+    # filtered = []
+    # for c in retrieved:
+    #     text = c.get("text", "").lower()
 
-        if len(text) < 40:   # 🔥 reduce from 80 → 40
-            continue
+    #     if len(text) < 40:   # 🔥 reduce from 80 → 40
+    #         continue
 
-        if "references" in text[:100]:   # 🔥 less strict
-            continue
+    #     if "references" in text[:100]:   # 🔥 less strict
+    #         continue
 
-        filtered.append(c)
+    #     filtered.append(c)
     
-    print(f"Before filter: {len(retrieved)}")
-    print(f"After filter: {len(filtered)}")
+    # print(f"Before filter: {len(retrieved)}")
+    # print(f"After filter: {len(filtered)}")
 
-    before_sources = Counter(c.get("source", "unknown") for c in filtered)
-    print(f"Unique sources before rerank: {len(before_sources)}")
-    print(f"Top source counts before rerank: {before_sources.most_common(5)}")
+    # before_sources = Counter(c.get("source", "unknown") for c in filtered)
+    # print(f"Unique sources before rerank: {len(before_sources)}")
+    # print(f"Top source counts before rerank: {before_sources.most_common(5)}")
 
-    reranked = reranker.rerank(args.query, filtered, top_k=args.top_k)
+    # reranked = reranker.rerank(args.query, filtered, top_k=args.top_k)
 
-    after_sources = Counter(c.get("source", "unknown") for c in reranked)
-    print(f"Unique sources after rerank: {len(after_sources)}")
-    print(f"Top source counts after rerank: {after_sources.most_common(5)}")
+    # after_sources = Counter(c.get("source", "unknown") for c in reranked)
+    # print(f"Unique sources after rerank: {len(after_sources)}")
+    # print(f"Top source counts after rerank: {after_sources.most_common(5)}")
 
-    print(f"Query: {args.query}")
-    print(f"Retrieved: {len(retrieved)}")
-    print(f"Reranked (top_k={args.top_k}): {len(reranked)}")
+    # print(f"Query: {args.query}")
+    # print(f"Retrieved: {len(retrieved)}")
+    # print(f"Reranked (top_k={args.top_k}): {len(reranked)}")
 
-    if retrieved:
-        highest_cosine = max(item.get("cosine_score", float("-inf")) for item in retrieved)
-        print(f"Highest cosine similarity in retrieved set: {highest_cosine:.4f} (higher is better)")
+    # if retrieved:
+    #     highest_cosine = max(item.get("cosine_score", float("-inf")) for item in retrieved)
+    #     print(f"Highest cosine similarity in retrieved set: {highest_cosine:.4f} (higher is better)")
 
-    def format_chunk_text(text):
-        clean_text = text.replace("\n", " ")
-        if args.full_text:
-            return clean_text
-        return clean_text[:args.preview_chars]
+    # def format_chunk_text(text):
+    #     clean_text = text.replace("\n", " ")
+    #     if args.full_text:
+    #         return clean_text
+    #     return clean_text[:args.preview_chars]
 
-    print("\n--- Retrieved Chunks (Before Reranking) ---")
-    if not retrieved:
-        print("No retrieved chunks found.")
-    else:
-        for i, item in enumerate(retrieved, start=1):
-            source = item.get("source", "unknown")
-            cosine_score = item.get("cosine_score", float("nan"))
-            text = item.get("text", "")
-            print(f"\n[{i}] cosine_score={cosine_score:.4f} source={source}")
-            print(format_chunk_text(text))
+    # print("\n--- Retrieved Chunks (Before Reranking) ---")
+    # if not retrieved:
+    #     print("No retrieved chunks found.")
+    # else:
+    #     for i, item in enumerate(retrieved, start=1):
+    #         source = item.get("source", "unknown")
+    #         cosine_score = item.get("cosine_score", float("nan"))
+    #         text = item.get("text", "")
+    #         print(f"\n[{i}] cosine_score={cosine_score:.4f} source={source}")
+    #         print(format_chunk_text(text))
 
-    print("\n--- Reranked Chunks (After Reranking) ---")
-    if not reranked:
-        print("No reranked results found.")
-    else:
-        for i, item in enumerate(reranked, start=1):
-            source = item.get("source", "unknown")
-            rerank_score = item.get("rerank_score", 0.0)
-            cosine_score = item.get("cosine_score", float("nan"))
-            text = item.get("text", "")
-            print(f"\n[{i}] rerank_score={rerank_score:.4f} cosine_score={cosine_score:.4f} source={source}")
-            print(format_chunk_text(text))
+    # print("\n--- Reranked Chunks (After Reranking) ---")
+    # if not reranked:
+    #     print("No reranked results found.")
+    # else:
+    #     for i, item in enumerate(reranked, start=1):
+    #         source = item.get("source", "unknown")
+    #         rerank_score = item.get("rerank_score", 0.0)
+    #         cosine_score = item.get("cosine_score", float("nan"))
+    #         text = item.get("text", "")
+    #         print(f"\n[{i}] rerank_score={rerank_score:.4f} cosine_score={cosine_score:.4f} source={source}")
+    #         print(format_chunk_text(text))
+
+    query = "who invented transformers?"
+
+    chunk = """
+    The Transformer was introduced in the seminal
+    2017 paper Attention Is All You Need.
+
+    Authors:
+    Ashish Vaswani
+    Noam Shazeer
+    Niki Parmar
+    Jakob Uszkoreit
+    Llion Jones
+    Aidan Gomez
+    Lukasz Kaiser
+    Illia Polosukhin
+    """
+
+    print(reranker.model.predict([(query, chunk)]))

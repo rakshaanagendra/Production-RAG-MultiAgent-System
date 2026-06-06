@@ -283,6 +283,142 @@ class MultiQueryHybridRetriever:
             "reason": "Based on duplicate rate and source concentration.",
         }
 
+    # Relevance confidence asks "Did I retrieve good chunks"
+    # Confidence confidence asks "What should the pipeline do next - generate, retry or abstain?"
+    # Answerability confidence asks "Given the retrieved chunks, do I have enough to answer the question?"
+    # Generation routing asks "How should the answer be written - normally, cautiously, or refuse to answer?"
+    # Answerability teaches the concept of evidence coverage
+
+    def _compute_answerability(
+        self,
+        query: str,
+        reranked_chunks: List[Dict[str, Any]],
+        relevance_confidence: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Estimates whether retrieved evidence is sufficient
+        to answer the user's query
+
+        This is NOT retrieval quality.
+
+        This is:
+            "Can I answer the question completely?"
+        """
+
+        query_tokens = set(
+            re.findall(r"\b[a-zA-Z0-9]+\b", query.lower())
+        )
+
+        STOPWORDS = {
+            "what", "is", "are", "the", "a", "an",
+            "how", "why", "when", "where",
+            "and", "or", "of", "to", "for",
+            "in", "on", "with", "about",
+            "compare", "difference", "between",
+            "explain", "describe", "then", "do", "does", "did",
+            "they", "them", "their", "this", "that", "these", "those",
+            "work", "concept", "idea", "insight", "implication", "consequence",
+            "tell", "show", "which", "who", "whom", "whose", "where", "when",
+            "do", "does", "did", "can", "could", "would", "should",
+        }
+
+        semantic_scores = []
+
+        for chunk in reranked_chunks[:10]:
+            score = chunk.get("rerank_score", 0.0)
+            semantic_scores.append(score)
+
+        semantic_score = max(semantic_scores) if semantic_scores else 0.0
+
+        query_tokens = {
+            token
+            for token in query_tokens
+            if token not in STOPWORDS
+        }
+
+        SYNONYM_EXPANSIONS = {
+            "invented": {
+                "invented",
+                "created",
+                "creator",
+                "developed",
+                "introduced",
+                "published",
+                "author",
+                "authors",
+                "researchers",
+            },
+        }
+
+        expanded_query_tokens = set()
+
+        for token in query_tokens:
+            expanded_query_tokens.add(token)
+
+            if token in SYNONYM_EXPANSIONS:
+                expanded_query_tokens.update(
+                    SYNONYM_EXPANSIONS[token]
+                )
+
+        if not query_tokens:
+            query_tokens = set(
+                re.findall(r"\b[a-zA-Z0-9]+\b", query.lower())
+            )
+
+        combined_text = " ".join(
+            chunk.get("text", "").lower()
+            for chunk in reranked_chunks[:10]
+        )
+
+        covered_terms = [
+            token
+            for token in expanded_query_tokens
+            if token in combined_text
+        ]
+
+        original_query_terms = len(query_tokens)
+
+        coverage_score = (
+            min(len(covered_terms), original_query_terms)
+            / original_query_terms
+            if original_query_terms
+            else 0.0
+        )
+
+        relevance_score = relevance_confidence.get("score", 0.0)
+
+        answerability_score = (
+            0.30 * coverage_score +
+            0.30 * relevance_score +
+            0.40 * semantic_score
+        )
+
+        if answerability_score >= 0.60:
+            label = "high"
+            can_answer = True
+
+        elif answerability_score >= 0.30:
+            label = "medium"
+            can_answer = True
+
+        else:
+            label = "low"
+            can_answer = False
+
+        return {
+            "score": round(answerability_score, 3),
+            "label": label,
+            "can_answer": can_answer,
+            "coverage_score": round(coverage_score, 3),
+            "semantic_score": round(semantic_score, 3),
+            "covered_terms": covered_terms,
+            "query_terms": sorted(query_tokens),
+            "reason": (
+                "Combines query-term coverage and retrieval relevance."
+            ),
+        }
+
+
     def build_context(
         self,
         chunks: List[Dict[str, Any]],
@@ -325,6 +461,112 @@ class MultiQueryHybridRetriever:
         return "\n\n" + ("\n\n" + ("-" * 80) + "\n\n").join(context_parts) if context_parts else ""
 
 
+    def _classify_query_intent(self, query: str) -> Dict[str, Any]:
+        """
+        Lightweight rule-based query intent classifier.
+
+        Returns:
+        {
+            "intent": "...",
+            "reason": "..."
+        }
+        """
+
+        q = (query or "").strip().lower()
+
+        comparison_patterns = [
+            " vs ",
+            " versus ",
+            "difference between",
+            "compare",
+            "comparison",
+            "contrast",
+            "similarity",
+        ]
+
+        howto_patterns = [
+            "how do",
+            "how to",
+            "steps",
+            "implement",
+            "build",
+            "create",
+            "develop",
+            "fix",
+            "troubleshoot",
+            "guide",
+            "tutorial",
+            "walkthrough",
+            "example",
+            "demo",
+        ]
+
+        fact_lookup_patterns = [
+            "who ",
+            "when ",
+            "where ",
+            "which ",
+        ]
+
+        definition_patterns = [
+            "what is",
+            "what are",
+            "define",
+            "meaning of",
+            "explain",
+            "definition",
+            "concept",
+            "idea",
+            "insight",
+            "implication",
+            "consequence",
+        ]
+
+        exploration_patterns = [
+            "explain",
+            "overview",
+            "summarize",
+            "tell me about",
+            "describe",
+            "relationship between",
+        ]
+
+        if any(p in q for p in comparison_patterns):
+            return {
+                "intent": "comparison",
+                "reason": "Comparison language detected."
+            }
+
+        if any(p in q for p in howto_patterns):
+            return {
+                "intent": "how_to",
+                "reason": "Procedural language detected."
+            }
+        
+        if any(q.startswith(p) for p in fact_lookup_patterns):
+            return {
+                "intent": "fact_lookup",
+                "reason": "Specific factual information requested."
+            }
+
+        if any(p in q for p in exploration_patterns):
+            return {
+                "intent": "exploration",
+                "reason": "Broad exploratory question."
+            }
+
+        if any(p in q for p in definition_patterns):
+            return {
+                "intent": "definition",
+                "reason": "Definition-style question."
+            }
+
+        return {
+            "intent": "general",
+            "reason": "No strong intent detected."
+        }
+
+
     # Retrieval selection strategy - not every query needs to go through the same retrieval process
     # Some queries can be semantically stronger, some maybe keyword heavy and the rest may be more ambigous requiring metadata and/or hybrid retrieval
     def _select_retrieval_strategy(
@@ -353,6 +595,8 @@ class MultiQueryHybridRetriever:
         """
         q = (query or "").strip()
         q_lower = q.lower()
+        intent_info = self._classify_query_intent(query)
+        intent = intent_info["intent"]
         tokens = re.findall(r"\b[a-z0-9_./:-]+\b", q_lower)
         token_count = len(tokens)
 
@@ -360,7 +604,7 @@ class MultiQueryHybridRetriever:
             "latest", "recent", "today", "uploaded", "upload", "file",
             "document", "doc", "source", "section", "page", "chapter",
             "appendix", "version", "pdf", "notes", "proposal", "thesis",
-            "date", "when", "find"
+            "date", "find"
         )
 
         semantic_cues = (
@@ -400,15 +644,22 @@ class MultiQueryHybridRetriever:
             dense_score += 1
         if any(word in q_lower for word in ("explain", "why", "how", "difference", "compare")):
             dense_score += 1
+        if intent == "fact_lookup":
+            dense_score +=2
 
         metadata_score = 0
-        if has_metadata_cue:
-            metadata_score += 2
+
+        metadata_terms_found = [
+            term for term in metadata_cues
+            if term in q_lower
+        ]
+
+        metadata_score += len(metadata_terms_found)
         if "section" in q_lower or "page" in q_lower or "source" in q_lower:
             metadata_score += 1
 
         # Strategy decision
-        if metadata_score >= 2:
+        if metadata_score >= 3:
             strategy = "metadata_hybrid"
         elif sparse_score >= 2 and sparse_score >= dense_score + 1:
             strategy = "sparse"
@@ -478,9 +729,33 @@ class MultiQueryHybridRetriever:
             })
             reason = "Mixed signals. Hybrid retrieval is the safest default."
 
+        if intent == "comparison":
+            params["retrieve_k"] = max(params["retrieve_k"], 80)
+            params["final_k"] = max(params["final_k"], 20)
+
+        elif intent == "how_to":
+            params["retrieve_k"] = max(params["retrieve_k"], 70)
+            params["final_k"] = max(params["final_k"], 15)
+
+        elif intent == "fact_lookup":
+            params["retrieve_k"] = max(params["retrieve_k"], 50)
+            params["final_k"] = max(params["final_k"], 10)
+            params["dense_weight"] = 0.7
+            params["sparse_weight"] = 0.3
+
+        elif intent == "definition":
+            params["retrieve_k"] = min(params["retrieve_k"], 40)
+            params["final_k"] = min(params["final_k"], 10)
+
+        elif intent == "exploration":
+            params["retrieve_k"] = max(params["retrieve_k"], 90)
+            params["final_k"] = max(params["final_k"], 20)
+
         return {
             "strategy": strategy,
             "reason": reason,
+            "query_intent": intent,
+            "query_intent_reason": intent_info["reason"],
             "signals": {
                 "has_metadata_cue": has_metadata_cue,
                 "has_semantic_cue": has_semantic_cue,
@@ -1038,10 +1313,18 @@ class MultiQueryHybridRetriever:
             "source_diversity": source_diversity,
         })
 
+        answerability = self._compute_answerability(
+            query=query,
+            reranked_chunks=reranked,
+            relevance_confidence=relevance_confidence,
+        )
+
         diagnostics = {
             "query": query,
             "expanded_queries": expanded_queries,
             "num_expanded_queries": len(expanded_queries),
+            "query_intent": strategy_info.get("query_intent"),
+            "query_intent_reason": strategy_info.get("query_intent_reason"),
             "retrieval_strategy": strategy_info["strategy"],
             "retrieval_strategy_details": strategy_info,
             "duplicate_stats": duplicate_stats,
@@ -1052,6 +1335,7 @@ class MultiQueryHybridRetriever:
             "lexical_overlap": lexical_overlap_stats,
             "relevance_confidence": relevance_confidence,
             "diversity_confidence": diversity_confidence,
+            "answerability": answerability,
             "per_query_results": [
                 {
                     "query": item["query"],
@@ -1070,6 +1354,7 @@ class MultiQueryHybridRetriever:
                     for c in merged_before_rerank[:5]
                 ],
             },
+            "merged_chunks": merged_before_rerank,
             "reranked_results": {
                 **_summarize_chunks(reranked, score_key="rerank_score"),
                 "top_rerank_scores": [
@@ -1077,6 +1362,7 @@ class MultiQueryHybridRetriever:
                     for c in reranked[:5]
                 ],
             },
+            "reranked_chunks": reranked,
             "context_summary": {
                 "count": len(context_chunks),
                 "sources": sorted({_chunk_source(c) for c in context_chunks}),
@@ -1214,6 +1500,7 @@ class MultiQueryHybridRetriever:
         """
         relevance = diagnostics.get("relevance_confidence", {})
         diversity = diagnostics.get("diversity_confidence", {})
+        answerability = diagnostics.get("answerability", {})
         domain_gate = diagnostics.get("domain_gate", {})
 
         relevance_label = relevance.get("label", "medium")
@@ -1221,6 +1508,25 @@ class MultiQueryHybridRetriever:
 
         in_domain = not domain_gate.get("is_ood", False)
         domain_fit = domain_gate.get("combined_fit", 0.0)
+
+        # Answerability failed and domain gate thinks it's OOD -> low confidence and retry/abstain
+        # Answerability failure alone is not a death sentence if domain gate thinks it's in-domain 
+        # and has some fit, because maybe retrieval just missed the mark but the 
+        # query is still valid for the corpus. But if domain gate also thinks it is OOD then 
+        # it is a stronger signal that the query might be fundamentally mismatched 
+        # with the corpus.
+        # So, answerability failure + query in domain then let LLM try
+
+
+        if (
+            not answerability.get("can_answer", True)
+            and domain_gate.get("is_ood", False)
+        ):
+            return {
+                "confidence": "low",
+                "action": "retry_or_abstain",
+                "reason": "Retrieved evidence does not sufficiently cover the query.",
+            }
 
         # Strong relevance
         if relevance_label == "strong":
@@ -1236,12 +1542,12 @@ class MultiQueryHybridRetriever:
                 "reason": "Relevant evidence is strong enough to answer normally.",
             }
 
-        # Medium relevance
-        if relevance_label == "medium":
+        # If answerability says we can answer, let generation proceed even if rerank confidence is not strong
+        if answerability.get("can_answer", False):
             return {
                 "confidence": "medium",
                 "action": "generate_cautiously",
-                "reason": "Evidence is usable but not ideal.",
+                "reason": "Answerability indicates sufficient evidence."
             }
 
         # Weak relevance, but domain gate says the query is still in-domain
@@ -1346,9 +1652,9 @@ class MultiQueryHybridRetriever:
                 best_source = chunk.get("source") or chunk.get("metadata", {}).get("source") or "unknown"
                 best_preview = text[:140].replace("\n", " ")
 
-        combined_fit = 0.7 * best_score + 0.3 * best_overlap
+        combined_fit = 0.85 * best_score + 0.15 * best_overlap
 
-        if combined_fit >= 0.55:
+        if combined_fit >= 0.45:
             return {
                 "is_ood": False,
                 "confidence": "high" if combined_fit >= 0.70 else "medium",
@@ -1421,6 +1727,9 @@ class MultiQueryHybridRetriever:
             }
         """
 
+        # Modern systems usually classify the query before pasing it into the domain gate for retrieval
+        intent_info = self._classify_query_intent(query)
+
         # This is the actual gate check before retrieving
         # If query looks OOD then no expansion, no retrieval, no reranking and no retry loop
         domain_gate = self._domain_gate_preflight(query)
@@ -1428,7 +1737,24 @@ class MultiQueryHybridRetriever:
         if domain_gate and domain_gate["is_ood"]:
             empty_diag = {
                 "query": query,
+                "expanded_queries": [],
+                "num_expanded_queries": 0,
+                "query_intent": intent_info["intent"],
+                "query_intent_reason": intent_info["reason"],
+                "retrieval_strategy": "skipped",
+                "retrieval_strategy_details": {
+                    "strategy": "skipped",
+                    "reason": "Domain gate detected an out-of-domain query.",
+                    "signals": {},
+                    "params": {},
+                },
                 "domain_gate": domain_gate,
+                "duplicate_stats": {
+                    "total_candidates": 0,
+                    "unique_candidates": 0,
+                    "duplicate_candidates": 0,
+                    "duplicate_rate": 0.0,
+                },
                 "retrieval_health": {
                     "is_weak": True,
                     "severity": "weak",
@@ -1445,6 +1771,53 @@ class MultiQueryHybridRetriever:
                     "score": 0.0,
                     "label": "weak",
                     "reason": "No in-domain evidence retrieved.",
+                },
+                "answerability": {
+                    "score": 0.0,
+                    "label": "low",
+                    "can_answer": False,
+                    "coverage_score": 0.0,
+                    "semantic_score": 0.0,
+                    "covered_terms": [],
+                    "query_terms": [],
+                    "reason": "No in-domain evidence was retrieved.",
+                },
+                "lexical_overlap": {
+                    "average_lexical_overlap": 0.0,
+                    "best_lexical_overlap": 0.0,
+                    "per_chunk": [],
+                },
+                "metadata_coverage": {
+                    "merged": {},
+                    "reranked": {},
+                    "context": {},
+                },
+                "source_diversity": {
+                    "merged": {},
+                    "reranked": {},
+                    "context": {},
+                },
+                "per_query_results": [],
+                "merged_results": {
+                    "count": 0,
+                    "sources": [],
+                    "source_distribution": {},
+                    "top_scores": [],
+                    "top_multi_query_rrf_scores": [],
+                },
+                "merged_chunks": [],
+                "reranked_results": {
+                    "count": 0,
+                    "sources": [],
+                    "source_distribution": {},
+                    "top_scores": [],
+                    "top_rerank_scores": [],
+                },
+                "reranked_chunks": [],
+                "context_summary": {
+                    "count": 0,
+                    "sources": [],
+                    "source_distribution": {},
                 },
             }
 
@@ -1581,11 +1954,16 @@ class MultiQueryHybridRetriever:
 
     def print_diagnostics(self, diag):
         print("\n==================================================")
-        print("RETRIEVAL DIAGNOSTICS")
+        print("QUERY ANALYSIS")
         print("==================================================")
+
 
         print("\nORIGINAL QUERY:")
         print(diag["query"])
+
+        print("\nQUERY INTENT:")
+        print(f"  Intent: {diag.get('query_intent')}")
+        print(f"  Reason: {diag.get('query_intent_reason')}")
 
         print("\nEXPANDED QUERIES:")
         for i, q in enumerate(diag["expanded_queries"], start=1):
@@ -1599,111 +1977,16 @@ class MultiQueryHybridRetriever:
         print(f"  Strategy: {strategy}")
         print(f"  Reason: {strategy_details.get('reason', '')}")
 
+        print("\n==================================================")
+        print("RETRIEVAL PIPELINE")
+        print("==================================================")
+
         print("\nDUPLICATE STATS:")
         dup = diag["duplicate_stats"]
         print(f"  Total candidates: {dup['total_candidates']}")
         print(f"  Unique candidates: {dup['unique_candidates']}")
         print(f"  Duplicate candidates: {dup['duplicate_candidates']}")
         print(f"  Duplicate rate: {dup['duplicate_rate']:.4f}")
-
-        # print("\nRERANK LIFT:")
-        # lift = diag["rerank_lift"]
-        # print(f"  Compared candidates: {lift['compared_candidates']}")
-        # print(f"  Average lift: {lift['average_lift']:.2f}")
-        # print(f"  Average absolute lift: {lift['average_abs_lift']:.2f}")
-        # print(f"  Promoted: {lift['promoted']}")
-        # print(f"  Demoted: {lift['demoted']}")
-        # print(f"  Unchanged: {lift['unchanged']}")
-
-        # print("\nTOP GAINS:")
-        # if lift["top_gains"]:
-        #     for idx, item in enumerate(lift["top_gains"], start=1):
-        #         print(f"\n[GAIN {idx}]")
-        #         print(f"Source: {item['source']}")
-        #         print(f"Before Rank: {item['before_rank']}")
-        #         print(f"After Rank: {item['after_rank']}")
-        #         print(f"Lift: +{item['lift']}")
-        #         print(f"Rerank Score: {item['rerank_score']:.4f}")
-        #         print(f"RRF Score: {item['rrf_score']:.6f}")
-        #         print("Preview:")
-        #         print(item["text_preview"])
-        #         print("-" * 60)
-        # else:
-        #     print("None")
-
-        # print("\nTOP LOSSES:")
-        # if lift["top_losses"]:
-        #     for idx, item in enumerate(lift["top_losses"], start=1):
-        #         print(f"\n[LOSS {idx}]")
-        #         print(f"Source: {item['source']}")
-        #         print(f"Before Rank: {item['before_rank']}")
-        #         print(f"After Rank: {item['after_rank']}")
-        #         print(f"Lift: {item['lift']}")
-        #         print(f"Rerank Score: {item['rerank_score']:.4f}")
-        #         print(f"RRF Score: {item['rrf_score']:.6f}")
-        #         print("Preview:")
-        #         print(item["text_preview"])
-        #         print("-" * 60)
-        # else:
-        #     print("None")
-
-        print("\nRETRIEVAL HEALTH:")
-        health = diag.get("retrieval_health", {})
-        print(f"  Severity: {health.get('severity', 'unknown')}")
-        print(f"  Risk score: {health.get('risk_score', 0.0)}")
-        print(f"  Is weak: {health.get('is_weak', False)}")
-
-        reasons = health.get("reasons", [])
-        if reasons:
-            print("  Reasons:")
-            for reason in reasons:
-                print(f"    - {reason}")
-        else:
-            print("  Reasons: none")
-
-        print("\nMETADATA COVERAGE:")
-
-        for stage_name, stage_cov in diag["metadata_coverage"].items():
-            print(f"\n{stage_name.upper()} CHUNKS:")
-            for field, stats in stage_cov.items():
-                print(
-                    f"  {field}: {stats['present']}/{stats['total']} "
-                    f"({stats['coverage_rate']:.4f})"
-                )
-
-        print("\nLEXICAL OVERLAP:")
-
-        lex = diag.get("lexical_overlap", {})
-        print(f"  Average lexical overlap: {lex.get('average_lexical_overlap', 0.0):.4f}")
-        print(f"  Best lexical overlap: {lex.get('best_lexical_overlap', 0.0):.4f}")
-
-        per_chunk = lex.get("per_chunk", [])
-        if per_chunk:
-            print("  Per chunk:")
-            for item in per_chunk:
-                print(
-                    f"    Chunk {item['rank']} | "
-                    f"Source: {item['source']} | "
-                    f"Overlap: {item['overlap']:.4f} | "
-                    f"Shared terms: {item['shared_terms']}"
-                )
-
-        print("\nSOURCE DIVERSITY:")
-
-        for stage_name, stage in diag["source_diversity"].items():
-            print(f"\n{stage_name.upper()} CHUNKS:")
-            print(f"  Total chunks: {stage['total_chunks']}")
-            print(f"  Unique sources: {stage['unique_sources']}")
-            print(f"  Dominant source: {stage['dominant_source']}")
-            print(f"  Dominant source count: {stage['dominant_source_count']}")
-            print(f"  Dominant ratio: {stage['dominant_ratio']:.4f}")
-            print(f"  Top-3 source count: {stage['top_k_count']}")
-            print(f"  Top-3 source ratio: {stage['top_k_ratio']:.4f}")
-            print(f"  Balance: {stage['balance']}")
-
-            print("  Source distribution:")
-            for source, count in stage["source_distribution"].items():
-                print(f"    {source}: {count}")
 
         # print("\n==================================================")
         # print("PER-QUERY RETRIEVAL")
@@ -1737,8 +2020,26 @@ class MultiQueryHybridRetriever:
         # for source, count in merged["source_distribution"].items():
         #     print(f"  {source}: {count}")
 
-        # print(f"\nTop Multi-Query RRF Scores:")
+        # print("\nTop Multi-Query RRF Scores:")
         # print(merged["top_multi_query_rrf_scores"])
+
+        # print("\nTOP 20 BEFORE RERANK")
+
+        # fused_results = diag.get("merged_chunks", [])
+        # reranked_chunks = diag.get("reranked_chunks", [])
+
+        # print("\nPIPELINE COUNTS")
+        # print(f"  merged_chunks   : {len(fused_results)}")
+        # print(f"  reranked_chunks : {len(reranked_chunks)}")
+
+        # for i, chunk in enumerate(fused_results[:20], start=1):
+        #     source = chunk.get("source", "unknown")
+
+        #     text = chunk.get("text", "")
+        #     preview = text[:150].replace("\n", " ")
+
+        #     print(f"\n[{i}] {source}")
+        #     print(preview)
 
         # print("\n==================================================")
         # print("RERANKED RESULTS")
@@ -1752,21 +2053,152 @@ class MultiQueryHybridRetriever:
         # for source, count in reranked["source_distribution"].items():
         #     print(f"  {source}: {count}")
 
-        # print(f"\nTop Rerank Scores:")
+        # print("\nTop Rerank Scores:")
         # print(reranked["top_rerank_scores"])
 
         # print("\n==================================================")
-        # print("FINAL CONTEXT SUMMARY")
+        # print("RERANK ANALYSIS")
         # print("==================================================")
 
-        # context = diag["context_summary"]
+        # print("\nRERANK LIFT:")
+        # lift = diag["rerank_lift"]
 
-        # print(f"Context Chunk Count: {context['count']}")
+        # print(f"  Compared candidates: {lift['compared_candidates']}")
+        # print(f"  Average lift: {lift['average_lift']:.2f}")
+        # print(f"  Average absolute lift: {lift['average_abs_lift']:.2f}")
+        # print(f"  Promoted: {lift['promoted']}")
+        # print(f"  Demoted: {lift['demoted']}")
+        # print(f"  Unchanged: {lift['unchanged']}")
 
-        # print("\nContext Sources:")
-        # for source, count in context["source_distribution"].items():
-        #     print(f"  {source}: {count}")
+        # print("\nTOP GAINS:")
 
+        # if lift["top_gains"]:
+        #     for idx, item in enumerate(lift["top_gains"], start=1):
+        #         print(f"\n[GAIN {idx}]")
+        #         print(f"Source: {item['source']}")
+        #         print(f"Before Rank: {item['before_rank']}")
+        #         print(f"After Rank: {item['after_rank']}")
+        #         print(f"Lift: +{item['lift']}")
+        #         print(f"Rerank Score: {item['rerank_score']:.4f}")
+        #         print(f"RRF Score: {item['rrf_score']:.6f}")
+        #         print("Preview:")
+        #         print(item["text_preview"])
+        #         print("-" * 60)
+        # else:
+        #     print("None")
+
+        # print("\nTOP LOSSES:")
+
+        # if lift["top_losses"]:
+        #     for idx, item in enumerate(lift["top_losses"], start=1):
+        #         print(f"\n[LOSS {idx}]")
+        #         print(f"Source: {item['source']}")
+        #         print(f"Before Rank: {item['before_rank']}")
+        #         print(f"After Rank: {item['after_rank']}")
+        #         print(f"Lift: {item['lift']}")
+        #         print(f"Rerank Score: {item['rerank_score']:.4f}")
+        #         print(f"RRF Score: {item['rrf_score']:.6f}")
+        #         print("Preview:")
+        #         print(item["text_preview"])
+        #         print("-" * 60)
+        # else:
+        #     print("None")
+
+        print("\n==================================================")
+        print("RETRIEVAL EVALUATION")
+        print("==================================================")
+
+        print("\nRETRIEVAL HEALTH:")
+
+        health = diag.get("retrieval_health", {})
+
+        print(f"  Severity: {health.get('severity', 'unknown')}")
+        print(f"  Risk score: {health.get('risk_score', 0.0)}")
+        print(f"  Is weak: {health.get('is_weak', False)}")
+
+        reasons = health.get("reasons", [])
+
+        if reasons:
+            print("  Reasons:")
+            for reason in reasons:
+                print(f"    - {reason}")
+        else:
+            print("  Reasons: none")
+
+        print("\nANSWERABILITY ESTIMATION:")
+
+        answerability = diag.get("answerability", {})
+
+        print(f"  Score: {answerability.get('score', 0.0)}")
+        print(f"  Label: {answerability.get('label', 'unknown')}")
+        print(f"  Can Answer: {answerability.get('can_answer', False)}")
+        print(f"  Coverage Score: {answerability.get('coverage_score', 0.0)}")
+        print(f"  Semantic Score: {answerability.get('semantic_score', 0.0)}")
+
+        print("  Query Terms:")
+        for term in answerability.get("query_terms", []):
+            print(f"    - {term}")
+
+        print("  Covered Terms:")
+        for term in answerability.get("covered_terms", []):
+            print(f"    - {term}")
+
+        print(f"  Reason: {answerability.get('reason', '')}")
+
+        print("\nLEXICAL OVERLAP:")
+
+        lex = diag.get("lexical_overlap", {})
+
+        print(f"  Average lexical overlap: {lex.get('average_lexical_overlap', 0.0):.4f}")
+        print(f"  Best lexical overlap: {lex.get('best_lexical_overlap', 0.0):.4f}")
+
+        per_chunk = lex.get("per_chunk", [])
+
+        if per_chunk:
+            print("  Per chunk:")
+            for item in per_chunk:
+                print(
+                    f"    Chunk {item['rank']} | "
+                    f"Source: {item['source']} | "
+                    f"Overlap: {item['overlap']:.4f} | "
+                    f"Shared terms: {item['shared_terms']}"
+                )
+
+        # print("\n==================================================")
+        # print("RETRIEVAL OBSERVABILITY")
+        # print("==================================================")
+
+        # print("\nMETADATA COVERAGE:")
+
+        # for stage_name, stage_cov in diag["metadata_coverage"].items():
+        #     print(f"\n{stage_name.upper()} CHUNKS:")
+
+        #     for field, stats in stage_cov.items():
+        #         print(
+        #             f"  {field}: {stats['present']}/{stats['total']} "
+        #             f"({stats['coverage_rate']:.4f})"
+        #         )
+
+        # print("\nSOURCE DIVERSITY:")
+
+        # for stage_name, stage in diag["source_diversity"].items():
+        #     print(f"\n{stage_name.upper()} CHUNKS:")
+
+        #     print(f"  Total chunks: {stage['total_chunks']}")
+        #     print(f"  Unique sources: {stage['unique_sources']}")
+        #     print(f"  Dominant source: {stage['dominant_source']}")
+        #     print(f"  Dominant source count: {stage['dominant_source_count']}")
+        #     print(f"  Dominant ratio: {stage['dominant_ratio']:.4f}")
+        #     print(f"  Top-3 source count: {stage['top_k_count']}")
+        #     print(f"  Top-3 source ratio: {stage['top_k_ratio']:.4f}")
+        #     print(f"  Balance: {stage['balance']}")
+
+        #     print("  Source distribution:")
+
+        #     for source, count in stage["source_distribution"].items():
+        #         print(f"    {source}: {count}")
+
+       
 
     def print_adaptive_result(self, adaptive_result):
         """
@@ -1780,16 +2212,13 @@ class MultiQueryHybridRetriever:
             "retrieval_health", {}
         )
 
-
-        print("\n==================================================")
-        print("DYNAMIC CONTEXT SIZING POLICY")
-        print("==================================================")
-
-        print(f"  chosen_final_k: {adaptive_result.get('chosen_final_k')}")
-        print(f"  chosen_context_top_k: {adaptive_result.get('chosen_context_top_k')}")
-
         relevance = adaptive_result["final_result"]["diagnostics"].get("relevance_confidence", {})
         diversity = adaptive_result["final_result"]["diagnostics"].get("diversity_confidence", {})
+
+        answerability = adaptive_result["final_result"]["diagnostics"].get(
+            "answerability",
+            {}
+        )
 
         strategy = adaptive_result["final_result"]["diagnostics"].get(
             "retrieval_strategy", "unknown"
@@ -1802,8 +2231,10 @@ class MultiQueryHybridRetriever:
         domain_gate = adaptive_result["final_result"]["diagnostics"].get("domain_gate", {})
 
         print("\n==================================================")
-        print("DOMAIN GATE / OOD DETECTION")
+        print("ADAPTIVE CONTROLLER")
         print("==================================================")
+
+        print("\nDOMAIN GATE / OOD DETECTION")
 
         if domain_gate:
             print(f"  is_ood: {domain_gate.get('is_ood', False)}")
@@ -1815,32 +2246,32 @@ class MultiQueryHybridRetriever:
             print(f"  combined_fit: {domain_gate.get('combined_fit', 0.0)}")
             print(f"  probe_count: {domain_gate.get('probe_count', 0)}")
             print(f"  top_source: {domain_gate.get('top_source', 'unknown')}")
-            print(f"  top_preview: {domain_gate.get('top_preview', '')}")
         else:
             print("  domain gate: not run")
 
+        intent = adaptive_result["final_result"]["diagnostics"].get(
+            "query_intent",
+            "unknown"
+        )
+
+        intent_reason = adaptive_result["final_result"]["diagnostics"].get(
+            "query_intent_reason",
+            ""
+        )
+
+        print("\nRETRIEVAL STRATEGY")
+        print(f"  strategy: {strategy}")
+        print(f"  reason: {strategy_details.get('reason', '')}")
+
+        print("\nQUERY INTENT")
+        print(f"  intent: {intent}")
+        print(f"  reason: {intent_reason}")
+
         print("\n==================================================")
-        print("RETRIEVAL STRATEGY SELECTION")
+        print("CONFIDENCE ANALYSIS")
         print("==================================================")
 
-        print(f"  Strategy: {strategy}")
-        print(f"  Reason: {strategy_details.get('reason', '')}")
-
-        signals = strategy_details.get("signals", {})
-        if signals:
-            print("\n  Signals:")
-            for key, value in signals.items():
-                print(f"    {key}: {value}")
-
-        params = strategy_details.get("params", {})
-        if params:
-            print("\n  Selected Parameters:")
-            for key, value in params.items():
-                print(f"    {key}: {value}")
-
-        print("\n==================================================")
         print("\nRELEVANCE CONFIDENCE")
-        print("\n==================================================")
         print(f"  score: {relevance.get('score', 0.0)}")
         print(f"  label: {relevance.get('label', 'unknown')}")
         print(f"  reason: {relevance.get('reason', '')}")
@@ -1850,31 +2281,45 @@ class MultiQueryHybridRetriever:
         print(f"  label: {diversity.get('label', 'unknown')}")
         print(f"  reason: {diversity.get('reason', '')}")
 
+        print("\nANSWERABILITY ESTIMATION")
+        print(f"  score: {answerability.get('score', 0.0)}")
+        print(f"  label: {answerability.get('label', 'unknown')}")
+        print(f"  can_answer: {answerability.get('can_answer', False)}")
+        print(f"  coverage_score: {answerability.get('coverage_score', 0.0)}")
+        print(f"  semantic_score: {answerability.get('semantic_score', 0.0)}")
+
+        print("  covered_terms:")
+        for term in answerability.get("covered_terms", []):
+            print(f"    - {term}")
+
         confidence_route = adaptive_result.get("confidence_route", {})
 
-        print("\n==================================================")
         print("\nCONFIDENCE ROUTE")
-        print("\n==================================================")
         print(f"  confidence: {confidence_route.get('confidence', 'unknown')}")
         print(f"  action: {confidence_route.get('action', 'unknown')}")
         print(f"  reason: {confidence_route.get('reason', '')}")
 
         print("\n==================================================")
-        print("ADAPTIVE RETRIEVAL")
+        print("ADAPTIVE DECISION")
         print("==================================================")
+
         print(f"Used retry: {adaptive_result['used_retry']}")
 
         if adaptive_result["retry_params"] is not None:
-            print("Retry params:")
+
+            print("\nRetry params:")
+
             for key, value in adaptive_result["retry_params"].items():
                 print(f"  {key}: {value}")
 
             decision_trace = adaptive_result.get("decision_trace", [])
 
             if decision_trace:
+
                 print("\nRETRY DECISION TRACE")
 
                 for i, step in enumerate(decision_trace, start=1):
+
                     print(f"\n[{i}] {step['reason']}")
 
                     for action in step["actions"]:
@@ -1885,174 +2330,41 @@ class MultiQueryHybridRetriever:
         print(f"  Risk score: {initial_health.get('risk_score', 0.0)}")
         print(f"  Is weak: {initial_health.get('is_weak', False)}")
 
-        reasons = initial_health.get("reasons", [])
-        if reasons:
-            print("  Reasons:")
-            for reason in reasons:
-                print(f"    - {reason}")
-
         print("\nFINAL HEALTH")
         print(f"  Severity: {final_health.get('severity', 'unknown')}")
         print(f"  Risk score: {final_health.get('risk_score', 0.0)}")
         print(f"  Is weak: {final_health.get('is_weak', False)}")
 
-        reasons = final_health.get("reasons", [])
-        if reasons:
-            print("  Reasons:")
-            for reason in reasons:
-                print(f"    - {reason}")
 
-        print("\nFINAL TOP RESULTS")
-        for i, c in enumerate(adaptive_result["final_result"]["reranked_chunks"][:5], start=1):
-            source = c.get("source", "unknown")
-            rerank_score = c.get("rerank_score", 0.0)
-            rrf_score = c.get("multi_query_rrf_score", 0.0)
-            print(f"  [{i}] {source} | rerank={rerank_score:.4f} | rrf={rrf_score:.4f}")
-
-        # print("\n==================================================")
-        # print("ADAPTIVE RETRIEVAL")
-        # print("==================================================")
-
-        # print(f"Used retry: {adaptive_result['used_retry']}")
-
-        # if adaptive_result["retry_params"] is not None:
-        #     print("\nRetry params:")
-        #     for key, value in adaptive_result["retry_params"].items():
-        #         print(f"  {key}: {value}")
-
-        # print("\n==================================================")
-        # print("INITIAL RETRIEVAL DIAGNOSTICS")
-        # print("==================================================")
-
-        # self.print_diagnostics(
-        #     adaptive_result["initial_result"]["diagnostics"]
-        # )
-
-        # print("\n==================================================")
-        # print("FINAL RETRIEVAL DIAGNOSTICS")
-        # print("==================================================")
-
-        # self.print_diagnostics(
-        #     adaptive_result["final_result"]["diagnostics"]
-        # )
-
-        # print("\n==================================================")
-        # print("FINAL RERANKED RESULTS")
-        # print("==================================================")
-
-        # for i, c in enumerate(
-        #     adaptive_result["final_result"]["reranked_chunks"],
-        #     start=1,
-        # ):
-        #     print(f"\n[{i}] source={c.get('source', 'unknown')}")
-
-        #     if "rerank_score" in c:
-        #         print(f"rerank_score={c['rerank_score']:.4f}")
-
-        #     if "multi_query_rrf_score" in c:
-        #         print(
-        #             f"multi_query_rrf_score="
-        #             f"{c['multi_query_rrf_score']:.4f}"
-        #         )
-
-        #     print(c.get("text", "")[:300])
-        #     print("-" * 80)
-
-        # print("\n==================================================")
-        # print("PROMPT-READY CONTEXT")
-        # print("==================================================")
-
-        # print(adaptive_result["final_result"]["context"])
-
-## Basic test cases for MultiQueryHybridRetriever
-# if __name__ == "__main__":
-#     multi_query_retriever = MultiQueryHybridRetriever()
-
-#     test_queries = [
-#         "What is dense and sparse retrieval?",
-#         "that thing where llms forget the middle part",
-#         "how do vector databases work",
-#         "bm25 vs embeddings",
-#     ]
-
-#     for query in test_queries:
-#         print("\n==================================================")
-#         print("ORIGINAL QUERY:")
-#         print(query)
-
-#         expanded_queries = multi_query_retriever.query_generator.generate_queries(
-#             query,
-#             num_queries=4,
-#         )
-
-#         print("\nEXPANDED QUERIES:\n")
-
-#         for i, q in enumerate(expanded_queries, start=1):
-#             print(f"[{i}] {q}")
-
-#         results = multi_query_retriever.search(
-#             query,
-#             num_queries=4,
-#             retrieve_k=40,
-#             final_k=10,
-#         )
-
-#         print("\nFINAL RERANKED RESULTS:\n")
-
-#         for i, c in enumerate(results, start=1):
-#             print(f"[{i}] source={c.get('source', 'unknown')}")
-
-#             if "rerank_score" in c:
-#                 print(f"rerank_score={c['rerank_score']:.4f}")
-
-#             if "multi_query_rrf_score" in c:
-#                 print(f"multi_query_rrf_score={c['multi_query_rrf_score']:.4f}")
-
-#             print(c.get("text", "")[:300])
-
-#             print("-" * 80)
 
 ## Additional test case for search_with_context i.e. retrieving results along with a prompt-ready context string
 if __name__ == "__main__":
     multi_query_retriever = MultiQueryHybridRetriever()
 
+    # For adaptive search testing, use queries that are more likely to trigger reason-aware retrieval
+    test_queries = [
+#         # "what is bm25",
+#         # "bm25 vs embeddings",
+#         # "how do vector databases work",
+            # "when was RAG introduced?",
+            "who invented transformers?",
+#         # "explain retrieval augmented generation",
+#         # "fix my wifi router"
+]
+
     # test_queries = [
-    #     "What is dense and sparse retrieval?",
-    #     "that thing where llms forget the middle part",
-    #     "how do vector databases work",
-    #     "bm25 vs embeddings",
+    #     "Ashish Vaswani",
+    #     "authors of attention is all you need",
+    #     "attention is all you need authors",
+    #     "who authored attention is all you need",
     # ]
 
-    # For adaptive search testing, use queries that are more likely to trigger reason-aware retrieval
-    test_queries = [ 
-        "that issue where transformers ignore middle context", 
-        "list the countries in the world", 
-        "lost in the middle attention problem", 
-        "fix my wifi router",
-        "what is dense and sparse retrieval?" ]
 
     for query in test_queries:
         print("\n==================================================")
         print("ORIGINAL QUERY:")
         print(query)
 
-        expanded_queries = multi_query_retriever.query_generator.generate_queries(
-            query,
-            num_queries=4,
-        )
-
-        print("\nEXPANDED QUERIES:\n")
-
-        for i, q in enumerate(expanded_queries, start=1):
-            print(f"[{i}] {q}")
-
-        # result = multi_query_retriever.search_with_diagnostics(
-        #     query,
-        #     num_queries=4,
-        #     retrieve_k=40,
-        #     final_k=10,
-        #     context_top_k=5,
-        # )
 
         # For demonstration, we will call the adaptive search which includes diagnostics and potential retry logic
         result = multi_query_retriever.adaptive_search_with_retry(
@@ -2063,9 +2375,25 @@ if __name__ == "__main__":
             context_top_k=5,
         )
 
+
+         # --------------------------------------------------
+        # ADAPTIVE RETRIEVAL + DIAGNOSTICS
+        # --------------------------------------------------
+
+        multi_query_retriever.print_adaptive_result(result)
+        print("\nRETRIEVAL DIAGNOSTICS")
+        multi_query_retriever.print_diagnostics(
+            result["final_result"]["diagnostics"]
+        )
+
+        # --------------------------------------------------
+        # CONTEXT CONSTRUCTION
+        # --------------------------------------------------
+
         generator = Generator()
 
         original_context = result["final_result"]["context"]
+
 
         compressed_context = generator.compress_context(
             query=query,
@@ -2074,8 +2402,6 @@ if __name__ == "__main__":
         )
 
 
-
-        multi_query_retriever.print_adaptive_result(result)
 
         print("\n==================================================")
         print("BEFORE COMPRESSION")
@@ -2086,6 +2412,7 @@ if __name__ == "__main__":
         print("AFTER COMPRESSION / PROMPT-READY CONTEXT")
         print("\n==================================================")
         print(compressed_context)
+
 
         print("\n=== LENGTH COMPARISON ===")
 
@@ -2103,36 +2430,65 @@ if __name__ == "__main__":
 
         # Use the compressed context for answer generation to simulate the full pipeline 
         # and see how the confidence route info can be passed to the generator for potential answer-level adjustments
+
+        print("\n==================================================")
+        print("GENERATION PREPARATION")
+        print("==================================================")
+
+        print("DYNAMIC CONTEXT SIZING POLICY")
+
+        print(f"  chosen_final_k: {result.get('chosen_final_k')}")
+        print(f"  chosen_context_top_k: {result.get('chosen_context_top_k')}")
+        print(f"  retrieved_chunks: {len(result['final_result']['reranked_chunks'])}")
+        print(f"  prompt_chunks: {len(result['final_result']['context_chunks'])}")
+
+        # --------------------------------------------------
+        # FINAL RERANKED RESULTS
+        # --------------------------------------------------
+
+        final_result = result["final_result"]
+
+        print("\n==================================================")
+        print("FINAL RERANKED RESULTS")
+        print("==================================================")
+
+        for i, c in enumerate(
+            final_result["reranked_chunks"][:5],
+            start=1,
+        ):
+
+            print(f"\n[{i}] source={c.get('source', 'unknown')}")
+
+            if "rerank_score" in c:
+                print(
+                    f"rerank_score="
+                    f"{c['rerank_score']:.4f}"
+                )
+
+            if "multi_query_rrf_score" in c:
+                print(
+                    f"multi_query_rrf_score="
+                    f"{c['multi_query_rrf_score']:.4f}"
+                )
+
+            print(c.get("text", "")[:300])
+
+            print("-" * 80)
+
+        # --------------------------------------------------
+        # GENERATION
+        # --------------------------------------------------
+
         answer = generator.generate(
             query=query,
             context=compressed_context,
             confidence_route=result.get("confidence_route", {}),
             already_compressed=True,
-)
-
-        # final_result = result["final_result"]
-
-
-        # print("\n==================================================")
-        # print("FINAL RERANKED RESULTS")
-        # print("==================================================")
-
-        # for i, c in enumerate(final_result["reranked_chunks"], start=1):
-        #     print(f"\n[{i}] source={c.get('source', 'unknown')}")
-
-        #     if "rerank_score" in c:
-        #         print(f"rerank_score={c['rerank_score']:.4f}")
-
-        #     if "multi_query_rrf_score" in c:
-        #         print(f"multi_query_rrf_score={c['multi_query_rrf_score']:.4f}")
-
-        #     print(c.get("text", "")[:300])
-
-        #     print("-" * 80)
-
-
-
+    )
+        
         print("\n==================================================")
         print("FINAL LLM ANSWER")
         print("==================================================")
+
         print(answer)
+
