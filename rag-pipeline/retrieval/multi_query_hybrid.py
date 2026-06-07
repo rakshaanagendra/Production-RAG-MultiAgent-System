@@ -19,6 +19,7 @@ from retrieval.retriever import Retriever
 from retrieval.multi_query_retriever import MultiQueryRetriever
 from retrieval.reranker import Reranker
 from generation.generator import Generator
+from observability.metrics_logger import MetricsLogger
 
 
 class MultiQueryHybridRetriever:
@@ -29,6 +30,7 @@ class MultiQueryHybridRetriever:
             client=client,
         )
         self.reranker = Reranker()
+        self.metrics_logger = MetricsLogger()
 
     def _deduplicate_by_text(self, chunks):
         seen = set()
@@ -163,12 +165,12 @@ class MultiQueryHybridRetriever:
             risk_score += 0.25
             reasons.append(f"Top rerank score is weak ({top_score:.3f}).")
 
-        if score_gap < 0.05:
-            risk_score += 0.15
+        if score_gap < 0.03:
+            risk_score += 0.10
             reasons.append(f"Rerank scores are flat (top gap {score_gap:.3f}).")
 
-        if score_std < 0.03:
-            risk_score += 0.10
+        if score_std < 0.02:
+            risk_score += 0.05
             reasons.append(f"Rerank scores have very low spread (std {score_std:.3f}).")
 
         if duplicate_rate > 0.40:
@@ -187,13 +189,15 @@ class MultiQueryHybridRetriever:
             risk_score += 0.10
             reasons.append(f"Top-3 sources dominate the context ({top3_source_concentration:.3f}).")
 
-        if lexical_overlap < 0.20:
-            risk_score += 0.15
-            reasons.append(f"Lexical overlap is weak ({lexical_overlap:.3f}).")
+        if lexical_overlap < 0.10:
+            risk_score += 0.10
+            reasons.append(
+                f"Lexical overlap is weak ({lexical_overlap:.3f})."
+            )
 
         risk_score = min(risk_score, 1.0)
 
-        if risk_score >= 0.60:
+        if risk_score >= 0.70:
             severity = "weak"
             is_weak = True
         elif risk_score >= 0.30:
@@ -1832,29 +1836,28 @@ class MultiQueryHybridRetriever:
                 "diagnostics": empty_diag,
             }
 
-            return {
+            ood_result = {
                 "used_retry": False,
                 "confidence_route": {
                     "confidence": "low",
                     "action": "retry_or_abstain",
                     "reason": "Domain gate detected an out-of-domain query.",
                 },
-                "decision_trace": [
-                    {
-                        "reason": "Domain gate blocked the query",
-                        "actions": [
-                            "Skipped retrieval",
-                            "Skipped reranking",
-                            "Abstained early",
-                        ],
-                    }
-                ],
+                "decision_trace": [],
                 "chosen_final_k": 0,
                 "chosen_context_top_k": 0,
                 "retry_params": None,
                 "initial_result": empty_result,
                 "final_result": empty_result,
             }
+
+            self._log_query_metrics(
+                query,
+                ood_result,
+            )
+
+            return ood_result
+
 
         initial_result = self.search_with_diagnostics(
             query=query,
@@ -1890,7 +1893,7 @@ class MultiQueryHybridRetriever:
 
         # If not weak, no retry.
         if not is_weak:
-            return {
+            healthy_result = {
                 "chosen_final_k": chosen_final_k,
                 "chosen_context_top_k": chosen_context_top_k,
                 "used_retry": False,
@@ -1899,6 +1902,13 @@ class MultiQueryHybridRetriever:
                 "initial_result": initial_result,
                 "final_result": initial_result,
             }
+
+            self._log_query_metrics(
+                query,
+                healthy_result,
+            )
+
+            return healthy_result
 
         # Weak retrieval -- choose a retry policy based on the reasons
         retry_decision = self._choose_retry_policy(
@@ -1933,7 +1943,7 @@ class MultiQueryHybridRetriever:
         retry_result["diagnostics"]["domain_gate"] = domain_gate
         final_route = self._choose_confidence_route(retry_result["diagnostics"])
 
-        return {
+        retry_output = {
             "used_retry": True,
             "confidence_route": final_route,
             "decision_trace": decision_trace,
@@ -1950,7 +1960,245 @@ class MultiQueryHybridRetriever:
             "initial_result": initial_result,
             "final_result": retry_result,
         }
-      
+
+        self._log_query_metrics(
+            query,
+            retry_output,
+        )
+
+        return retry_output
+
+
+    # Observability: log one event per query with key retrieval signals and the final confidence route decision for monitoring and analysis
+
+    def _log_query_metrics(
+        self,
+        query,
+        adaptive_result,
+    ):
+        """
+        Store one observability event per query.
+        """
+
+        print("\nDEBUG: _log_query_metrics CALLED")
+
+
+        initial_diag = (
+            adaptive_result["initial_result"]
+            .get("diagnostics", {})
+        )
+
+        final_diag = (
+            adaptive_result["final_result"]
+            .get("diagnostics", {})
+        )
+
+        initial_answerability = initial_diag.get(
+            "answerability",
+            {}
+        )
+
+        final_answerability = final_diag.get(
+            "answerability",
+            {}
+        )
+
+        initial_relevance = initial_diag.get(
+            "relevance_confidence",
+            {}
+        )
+
+        final_relevance = final_diag.get(
+            "relevance_confidence",
+            {}
+        )
+
+        initial_diversity = initial_diag.get(
+            "diversity_confidence",
+            {}
+        )
+
+        final_diversity = final_diag.get(
+            "diversity_confidence",
+            {}
+        )
+
+        initial_health = initial_diag.get(
+            "retrieval_health",
+            {}
+        )
+
+        final_health = final_diag.get(
+            "retrieval_health",
+            {}
+        )
+
+        domain_gate = final_diag.get(
+            "domain_gate",
+            {}
+        )
+
+        confidence_route = adaptive_result.get(
+            "confidence_route",
+            {}
+        )
+
+
+        initial_answerability_score = (
+            initial_answerability.get(
+                "score",
+                0.0
+            )
+        )
+
+        final_answerability_score = (
+            final_answerability.get(
+                "score",
+                0.0
+            )
+        )
+
+        answerability_delta = round(
+            final_answerability_score
+            - initial_answerability_score,
+            3
+        )
+
+        initial_relevance_score = (
+            initial_relevance.get(
+                "score",
+                0.0
+            )
+        )
+
+        final_relevance_score = (
+            final_relevance.get(
+                "score",
+                0.0
+            )
+        )
+
+        relevance_delta = round(
+            final_relevance_score
+            - initial_relevance_score,
+            3
+        )
+
+        initial_diversity_score = (
+            initial_diversity.get(
+                "score",
+                0.0
+            )
+        )
+
+        final_diversity_score = (
+            final_diversity.get(
+                "score",
+                0.0
+            )
+        )
+
+        diversity_delta = round(
+            final_diversity_score
+            - initial_diversity_score,
+            3
+        )
+
+
+        event = {
+
+            # Query
+            "query": query,
+
+            # Routing
+            "intent":
+                final_diag.get(
+                    "query_intent",
+                    "unknown"
+                ),
+
+            "strategy":
+                final_diag.get(
+                    "retrieval_strategy",
+                    "unknown"
+                ),
+
+            # Domain Gate
+            "is_ood":
+                domain_gate.get(
+                    "is_ood",
+                    False
+                ),
+
+            # Controller
+            "used_retry":
+                adaptive_result.get(
+                    "used_retry",
+                    False
+                ),
+
+            "retry_reasons": [
+                step.get("reason", "unknown")
+                for step in adaptive_result.get(
+                    "decision_trace",
+                    []
+                )
+                if isinstance(step, dict)
+            ],
+
+
+            # Initial State
+            "initial_health":
+                initial_health.get(
+                    "severity",
+                    "unknown"
+                ),
+
+            "initial_answerability":
+                initial_answerability_score,
+
+            # Final State
+            "final_health":
+                final_health.get(
+                    "severity",
+                    "unknown"
+                ),
+
+            "final_answerability":
+                final_answerability_score,
+
+            # Improvement
+            "answerability_delta":
+                answerability_delta,
+
+            "initial_relevance":
+                initial_relevance_score,
+
+            "final_relevance":
+                final_relevance_score,
+
+            "relevance_delta":
+                relevance_delta,
+
+            "initial_diversity":
+                initial_diversity_score,
+
+            "final_diversity":
+                final_diversity_score,
+
+            "diversity_delta":
+                diversity_delta,
+
+            # Final Decision
+            "final_confidence":
+                confidence_route.get(
+                    "confidence",
+                    "unknown"
+                ),
+        }
+
+        self.metrics_logger.log(event)
+
 
     def print_diagnostics(self, diag):
         print("\n==================================================")
@@ -2343,13 +2591,33 @@ if __name__ == "__main__":
 
     # For adaptive search testing, use queries that are more likely to trigger reason-aware retrieval
     test_queries = [
-#         # "what is bm25",
-#         # "bm25 vs embeddings",
-#         # "how do vector databases work",
-            # "when was RAG introduced?",
+            "what is bm25",
+            "bm25 vs sparse retrieval",
+            "how do vector databases work",
+            "when was RAG introduced?",
             "who invented transformers?",
-#         # "explain retrieval augmented generation",
-#         # "fix my wifi router"
+            "explain retrieval augmented generation",
+            "fix my wifi router",
+            "explain faiss",
+            "how does reranking work in retrieval pipelines",
+            "what is colbERT",
+            "what is ragas evaluation?",
+            "what is splade?"   
+            "how do embeddings work?",
+            "what are some core evaluation metrics for retrieval systems?",
+            "what are text splitters and why are they important?",
+            "explain two main RAG architectures",
+            "what is lost in the middle concept in RAG?",
+            "what is machine learning?",
+            "what is python?",
+            "what is the capital of India?",
+            "what are some limitations of RAG?",
+            "what is agentic RAG?",
+            "explain all about transformers",
+            "what is self attention in transformers?",
+            "why is positional encoding needed in transformers?",
+            "what is langchain?",
+            "explain hybrid retrieval in RAG"
 ]
 
     # test_queries = [
