@@ -1,10 +1,10 @@
 from typing import Dict, Any, List, Optional
 import io
 import sys
+import time
 from pathlib import Path
 from collections import Counter
 import re
-
 
 if isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -13,13 +13,15 @@ if isinstance(sys.stderr, io.TextIOWrapper):
 
 PIPELINE_ROOT = Path(__file__).resolve().parents[1]
 if str(PIPELINE_ROOT) not in sys.path:
-    sys.path.insert(0, str(PIPELINE_ROOT)) 
+    sys.path.insert(0, str(PIPELINE_ROOT))
 
 from retrieval.retriever import Retriever
 from retrieval.multi_query_retriever import MultiQueryRetriever
 from retrieval.reranker import Reranker
 from generation.generator import Generator
 from observability.metrics_logger import MetricsLogger
+from caching.query_cache import QueryCache
+from caching.retrieval_cache import RetrievalCache
 
 
 class MultiQueryHybridRetriever:
@@ -31,7 +33,9 @@ class MultiQueryHybridRetriever:
         )
         self.reranker = Reranker()
         self.metrics_logger = MetricsLogger()
-
+        self.query_cache = QueryCache()
+        self.retrieval_cache = RetrievalCache()
+        
     def _deduplicate_by_text(self, chunks):
         seen = set()
         unique = []
@@ -546,7 +550,7 @@ class MultiQueryHybridRetriever:
                 "intent": "how_to",
                 "reason": "Procedural language detected."
             }
-        
+
         if any(q.startswith(p) for p in fact_lookup_patterns):
             return {
                 "intent": "fact_lookup",
@@ -931,6 +935,8 @@ class MultiQueryHybridRetriever:
             }
         """
 
+        search_start = time.perf_counter()
+
         def _chunk_source(chunk):
             return chunk.get("source") or chunk.get("metadata", {}).get("source") or "unknown"
 
@@ -960,12 +966,87 @@ class MultiQueryHybridRetriever:
 
         strategy_params = strategy_info["params"]
 
-        expanded_queries = self.query_generator.generate_queries(
-            query,
-            num_queries=strategy_params["num_queries"],
+        retrieval_cache_hit = False
+
+        strategy_name = strategy_info["strategy"]
+
+        # Time the query expansion step and note cache hits
+        query_expansion_start = time.perf_counter()
+
+        # Implementing a simple in-memory cache for query expansions to speed up repeated queries and analyze 
+        # cache hit rates in diagnostics
+
+        expanded_queries = []
+        query_cache_hit = False
+
+        if self.query_cache.exists(query):
+
+            expanded_queries = self.query_cache.get(query)
+
+            query_cache_hit = True
+
+        else:
+
+            expanded_queries = (
+                self.query_generator.generate_queries(
+                    query,
+                    num_queries=strategy_params["num_queries"],
+                )
+            )
+
+            self.query_cache.set(
+                query,
+                expanded_queries,
+            )
+
+        print(
+            f"[QUERY CACHE] Hit={query_cache_hit}"
         )
 
+        query_expansion_latency_ms = round(
+            (time.perf_counter() - query_expansion_start) * 1000,
+            2
+        )
+
+        # print("\nDEBUG RETRIEVAL CACHE")
+        # print(f"query={query}")
+        # print(f"strategy={strategy_name}")
+
+        # exists = self.retrieval_cache.exists(
+        #     query,
+        #     strategy_name,
+        # )
+
+        # print(f"exists={exists}")
+
+        # if exists:
+
+        if self.retrieval_cache.exists(
+            query,
+            strategy_name,
+        ):
+
+            cached_result = self.retrieval_cache.get(
+                query,
+                strategy_name,
+            )
+
+            if cached_result is not None:
+
+                retrieval_cache_hit = True
+
+                print("[RETRIEVAL CACHE] Hit=True")
+
+                cached_result["diagnostics"]["cache"][
+                    "retrieval_cache_hit"
+                ] = True
+
+                return cached_result
+
         per_query_results = []
+
+        retrieval_start = time.perf_counter()
+        retrieval_latency_ms = 0.0
 
         for expanded_query in expanded_queries:
             results = self.retriever.hybrid_search(
@@ -980,6 +1061,7 @@ class MultiQueryHybridRetriever:
                 min_bm25_score=strategy_params["min_bm25_score"],
                 max_per_source=strategy_params["max_per_source"],
             )
+
 
             per_query_results.append(
                 {
@@ -1000,6 +1082,13 @@ class MultiQueryHybridRetriever:
                     },
                 }
             )
+
+            retrieval_latency_ms = round(
+                (time.perf_counter() - retrieval_start) * 1000,
+                2
+            )
+
+    
 
         query_result_lists = [entry["results"] for entry in per_query_results]
 
@@ -1250,14 +1339,24 @@ class MultiQueryHybridRetriever:
                 "top_losses": top_losses,
             }
 
+        fusion_start = time.perf_counter()
+
         merged = self._aggregate_results(
             query_result_lists,
             k=k,
             max_per_source=max_per_source,
-)
+        )
+
+        fusion_latency_ms = round(
+            (time.perf_counter() - fusion_start) * 1000,
+            2
+        )
 
         # Keep a copy before reranking because reranker mutates chunks in place.
+
         merged_before_rerank = [chunk.copy() for chunk in merged]
+
+        rerank_start = time.perf_counter()
 
         reranked = self.reranker.rerank(
             query=query,
@@ -1265,8 +1364,21 @@ class MultiQueryHybridRetriever:
             top_k=final_k,
         )
 
+        rerank_latency_ms = round(
+            (time.perf_counter() - rerank_start) * 1000,
+            2
+        )
+
+        rerank_candidates_count = len(merged)
+        latency_per_candidate_ms = round(
+            rerank_latency_ms / max(rerank_candidates_count, 1),
+            2
+        )
+
         # Before, reranked could still leave repeated sources in the final list but now after reranking final list will be trimmed so each source appears at most max_per_source times
         reranked = self._apply_source_cap(reranked, max_per_source)
+
+        diagnostics_start = time.perf_counter()
 
         lexical_overlap_stats = _compute_lexical_overlap(
             query_text=query,
@@ -1285,19 +1397,18 @@ class MultiQueryHybridRetriever:
         context_chunks = reranked[:context_top_k]
 
         metadata_coverage = {
-        "merged": _compute_metadata_coverage(merged_before_rerank),
-        "reranked": _compute_metadata_coverage(reranked),
-        "context": _compute_metadata_coverage(context_chunks),
-    }
-        
+            "merged": _compute_metadata_coverage(merged_before_rerank),
+            "reranked": _compute_metadata_coverage(reranked),
+            "context": _compute_metadata_coverage(context_chunks),
+        }
+
         source_diversity = {
-        "merged": _compute_source_diversity(merged_before_rerank),
-        "reranked": _compute_source_diversity(reranked),
-        "context": _compute_source_diversity(context_chunks),
-    }
+            "merged": _compute_source_diversity(merged_before_rerank),
+            "reranked": _compute_source_diversity(reranked),
+            "context": _compute_source_diversity(context_chunks),
+        }
 
         rerank_scores = [c.get("rerank_score", 0.0) for c in reranked]
-        source_div_context = source_diversity["context"]
         merged_div_context = source_diversity["merged"]
 
         retrieval_health_input = {
@@ -1321,6 +1432,16 @@ class MultiQueryHybridRetriever:
             query=query,
             reranked_chunks=reranked,
             relevance_confidence=relevance_confidence,
+        )
+
+        diagnostics_latency_ms = round(
+            (time.perf_counter() - diagnostics_start) * 1000,
+            2
+        )
+
+        total_search_latency_ms = round(
+            (time.perf_counter() - search_start) * 1000,
+            2
         )
 
         diagnostics = {
@@ -1372,9 +1493,28 @@ class MultiQueryHybridRetriever:
                 "sources": sorted({_chunk_source(c) for c in context_chunks}),
                 "source_distribution": dict(Counter(_chunk_source(c) for c in context_chunks)),
             },
+
+            "latency": {
+                "query_expansion_latency_ms": query_expansion_latency_ms,
+                "retrieval_latency_ms": retrieval_latency_ms,
+                "fusion_latency_ms": fusion_latency_ms,
+                "rerank_latency_ms": rerank_latency_ms,
+                "diagnostics_latency_ms": diagnostics_latency_ms,
+                "total_search_latency_ms": total_search_latency_ms,
+                "rerank_candidates_count": rerank_candidates_count,
+                "latency_per_candidate_ms": latency_per_candidate_ms,
+            },
+
+            "cache": {
+                "query_cache_hit": query_cache_hit,
+                "query_expansion_latency_ms":
+                    query_expansion_latency_ms,
+                "retrieval_cache_hit": retrieval_cache_hit,
+            }
         }
 
-        return {
+
+        result = {
             "query": query,
             "expanded_queries": expanded_queries,
             "per_query_results": per_query_results,
@@ -1384,6 +1524,16 @@ class MultiQueryHybridRetriever:
             "context": context,
             "diagnostics": diagnostics,
         }
+
+        # print(f"strategy_name={strategy_name}")
+
+        self.retrieval_cache.set(
+            query,
+            strategy_name,
+            result,
+        )
+
+        return result
 
     def _choose_retry_policy(
         self,
@@ -1445,7 +1595,7 @@ class MultiQueryHybridRetriever:
                     ],
                 }
             )
-            
+
         # 3) Low source diversity -> broaden search
         if "source diversity is low" in reasons_text:
             policy["num_queries"] = min(policy["num_queries"] + 1, 6)
@@ -1514,10 +1664,10 @@ class MultiQueryHybridRetriever:
         domain_fit = domain_gate.get("combined_fit", 0.0)
 
         # Answerability failed and domain gate thinks it's OOD -> low confidence and retry/abstain
-        # Answerability failure alone is not a death sentence if domain gate thinks it's in-domain 
-        # and has some fit, because maybe retrieval just missed the mark but the 
-        # query is still valid for the corpus. But if domain gate also thinks it is OOD then 
-        # it is a stronger signal that the query might be fundamentally mismatched 
+        # Answerability failure alone is not a death sentence if domain gate thinks it's in-domain
+        # and has some fit, because maybe retrieval just missed the mark but the
+        # query is still valid for the corpus. But if domain gate also thinks it is OOD then
+        # it is a stronger signal that the query might be fundamentally mismatched
         # with the corpus.
         # So, answerability failure + query in domain then let LLM try
 
@@ -1570,7 +1720,7 @@ class MultiQueryHybridRetriever:
 
 
 
-    
+
     # A soft gate to detect out-of-domain queries before doing heavy retrieval work.
     # Runs a quick probe search against the corpus and checks if the query seems to belong to the same domain based on retrieval signals and lexical overlap.
     # This is intentionally designed to be soft and corpus-aware without hardcoded rules, relying instead on evidence from the actual index
@@ -1736,7 +1886,21 @@ class MultiQueryHybridRetriever:
 
         # This is the actual gate check before retrieving
         # If query looks OOD then no expansion, no retrieval, no reranking and no retry loop
+
+        # Timing the domain gate separately to understand its latency impact on the overall system
+        # and to ensure it remains lightweight as intended. We want to catch OOD queries early
+        # without adding significant overhead to in-domain queries.
+        domain_gate_start = time.perf_counter()
+
         domain_gate = self._domain_gate_preflight(query)
+
+
+        domain_gate_latency_ms = round(
+            (time.perf_counter() - domain_gate_start) * 1000,
+            2
+        )
+
+        domain_gate["latency_ms"] = domain_gate_latency_ms
 
         if domain_gate and domain_gate["is_ood"]:
             empty_diag = {
@@ -1823,6 +1987,11 @@ class MultiQueryHybridRetriever:
                     "sources": [],
                     "source_distribution": {},
                 },
+                "latency": {
+                    "domain_gate_latency_ms": domain_gate_latency_ms,
+                    "retrieval_pipeline_latency_ms": 0.0,
+                    "total_search_latency_ms": domain_gate_latency_ms,
+                },
             }
 
             empty_result = {
@@ -1858,6 +2027,8 @@ class MultiQueryHybridRetriever:
 
             return ood_result
 
+        # Time full initial retrieval pipeline
+        initial_retrieval_start = time.perf_counter()
 
         initial_result = self.search_with_diagnostics(
             query=query,
@@ -1875,8 +2046,21 @@ class MultiQueryHybridRetriever:
             include_scores=include_scores,
         )
 
+
+
+        initial_retrieval_latency_ms = round(
+            (time.perf_counter() - initial_retrieval_start) * 1000,
+            2
+        )
+
         # Attach gate info to the initial result so it always shows up in diagnostics
         initial_result["diagnostics"]["domain_gate"] = domain_gate
+
+        # Store Initial Retrieval Latency
+        initial_result["diagnostics"].setdefault("latency", {}).update({
+            "domain_gate_latency_ms": domain_gate_latency_ms,
+            "retrieval_pipeline_latency_ms": initial_retrieval_latency_ms,
+        })
 
         initial_health = initial_result["diagnostics"].get("retrieval_health", {})
         is_weak = initial_health.get("is_weak", False)
@@ -1885,7 +2069,7 @@ class MultiQueryHybridRetriever:
         # System does not always need the same amount of context as too little context misses evidence
         # too much context adds noise
         # the right amount depends on retrieval quality
-        # added dynamic context sizing which chooses how many chunks to include in the final context 
+        # added dynamic context sizing which chooses how many chunks to include in the final context
         # and how many top reranked chunks to consider when building the context based on the initial retrieval health assessment
         size_policy = self._choose_context_sizes(initial_health)
         chosen_final_k = size_policy["final_k"]
@@ -1924,6 +2108,9 @@ class MultiQueryHybridRetriever:
         retry_policy = retry_decision["policy"]
         decision_trace = retry_decision["decision_trace"]
 
+        # Measure retry cost
+        retry_start = time.perf_counter()
+
         retry_result = self.search_with_diagnostics(
             query=query,
             num_queries=retry_policy["num_queries"],
@@ -1940,7 +2127,20 @@ class MultiQueryHybridRetriever:
             include_scores=include_scores,
         )
 
+        retry_latency_ms = round(
+            (time.perf_counter() - retry_start) * 1000,
+            2
+        )
+
         retry_result["diagnostics"]["domain_gate"] = domain_gate
+
+        # Store Retry Latency
+        retry_result["diagnostics"].setdefault("latency", {}).update({
+            "domain_gate_latency_ms": domain_gate_latency_ms,
+            "retry_pipeline_latency_ms": retry_latency_ms,
+            "retry_latency_ms": retry_latency_ms,
+        })
+
         final_route = self._choose_confidence_route(retry_result["diagnostics"])
 
         retry_output = {
@@ -1959,6 +2159,7 @@ class MultiQueryHybridRetriever:
             },
             "initial_result": initial_result,
             "final_result": retry_result,
+            "retry_latency_ms": retry_latency_ms,
         }
 
         self._log_query_metrics(
@@ -2104,6 +2305,74 @@ class MultiQueryHybridRetriever:
             3
         )
 
+        latency_info = final_diag.get("latency", {})
+
+        query_expansion_latency_ms = latency_info.get(
+                "query_expansion_latency_ms",
+                0.0
+            )
+
+        retrieval_latency_ms = latency_info.get(
+            "retrieval_latency_ms",
+            0.0
+        )
+
+        fusion_latency_ms = latency_info.get(
+            "fusion_latency_ms",
+            0.0
+        )
+
+        rerank_latency_ms = latency_info.get(
+            "rerank_latency_ms",
+            0.0
+        )
+
+        diagnostics_latency_ms = latency_info.get(
+            "diagnostics_latency_ms",
+            0.0
+        )
+
+        total_search_latency_ms = latency_info.get(
+            "total_search_latency_ms",
+            0.0
+        )
+
+        total_latency = max(
+            total_search_latency_ms,
+            1
+        )
+
+        retrieval_pct = round(
+            retrieval_latency_ms / total_latency,
+            3
+        )
+
+        fusion_pct = round(
+            fusion_latency_ms / total_latency,
+            3
+        )
+
+        rerank_pct = round(
+            rerank_latency_ms / total_latency,
+            3
+        )
+
+        diagnostics_pct = round(
+            diagnostics_latency_ms / total_latency,
+            3
+        )
+
+        rerank_candidates_count = latency_info.get(
+            "rerank_candidates_count",
+            0
+        )
+
+        latency_per_candidate_ms = latency_info.get(
+            "latency_per_candidate_ms",
+            0.0
+        )
+
+
 
         event = {
 
@@ -2130,11 +2399,175 @@ class MultiQueryHybridRetriever:
                     False
                 ),
 
+            "domain_fit":
+                domain_gate.get(
+                    "combined_fit",
+                    0.0
+                ),
+
+            "domain_gate_confidence":
+                domain_gate.get(
+                    "confidence",
+                    "unknown"
+                ),
+
+            "domain_gate_action":
+                domain_gate.get(
+                    "action",
+                    "unknown"
+                ),
+
+            "expanded_queries_count":
+                len(
+                    final_diag.get(
+                        "expanded_queries",
+                        []
+                    )
+                ),
+
+            "merged_candidates":
+                len(
+                    final_diag.get(
+                        "merged_chunks",
+                        []
+                    )
+                ),
+
+            "reranked_candidates":
+                len(
+                    final_diag.get(
+                        "reranked_chunks",
+                        []
+                    )
+                ),
+
+            "context_chunks":
+                len(
+                    adaptive_result["final_result"]
+                    .get(
+                        "context_chunks",
+                        []
+                    )
+                ),
+
             # Controller
             "used_retry":
                 adaptive_result.get(
                     "used_retry",
                     False
+                ),
+
+            # Cache
+
+            "query_cache_hit":
+                final_diag.get(
+                    "cache",
+                    {}
+                ).get(
+                    "query_cache_hit",
+                    False
+                ),
+
+            "query_cache_miss":
+                not final_diag.get(
+                    "cache",
+                    {}
+                ).get(
+                    "query_cache_hit",
+                    False
+                ),
+
+            "query_cache_latency_saved_ms":
+                final_diag.get(
+                    "cache",
+                    {}
+                ).get(
+                    "query_expansion_latency_ms",
+                    0.0
+                )
+                if final_diag.get(
+                    "cache",
+                    {}
+                ).get(
+                    "query_cache_hit",
+                    False
+                )
+                else 0.0,
+
+            # TODO: done
+            # Replace with actual saved latency from 2127
+            # stored alongside cache entry.
+
+            "retrieval_cache_hit":
+                final_diag.get(
+                    "cache",
+                    {}
+                ).get(
+                    "retrieval_cache_hit",
+                    False
+                ),
+
+            "retrieval_cache_miss":
+                not final_diag.get(
+                    "cache",
+                    {}
+                ).get(
+                    "retrieval_cache_hit",
+                    False
+                ),
+
+            "retrieval_cache_latency_saved_ms": 0.0,
+
+            "confidence_action":
+                confidence_route.get(
+                    "action",
+                    "unknown"
+                ),
+
+
+            "query_expansion_latency_ms":
+                query_expansion_latency_ms,
+
+            "retrieval_latency_ms":
+                retrieval_latency_ms,
+
+            "fusion_latency_ms":
+                fusion_latency_ms,
+
+            "rerank_latency_ms":
+                rerank_latency_ms,
+
+            "diagnostics_latency_ms":
+                diagnostics_latency_ms,
+
+            "total_search_latency_ms":
+                total_search_latency_ms,
+
+            "retrieval_pct":
+                retrieval_pct,
+
+            "fusion_pct":
+                fusion_pct,
+
+            "rerank_pct":
+                rerank_pct,
+
+            "diagnostics_pct":
+                diagnostics_pct,
+
+            "rerank_candidates_count":
+                rerank_candidates_count,
+
+            "latency_per_candidate_ms":
+                latency_per_candidate_ms,
+
+            "domain_gate_latency_ms":
+                domain_gate.get("latency_ms", 0.0),
+
+            "retry_latency_ms":
+                latency_info.get(
+                    "retry_latency_ms",
+                    adaptive_result.get("retry_latency_ms", 0.0)
                 ),
 
             "retry_reasons": [
@@ -2147,6 +2580,9 @@ class MultiQueryHybridRetriever:
             ],
 
 
+
+
+
             # Initial State
             "initial_health":
                 initial_health.get(
@@ -2156,6 +2592,12 @@ class MultiQueryHybridRetriever:
 
             "initial_answerability":
                 initial_answerability_score,
+
+            "initial_risk_score":
+                initial_health.get(
+                    "risk_score",
+                    0.0
+                ),
 
             # Final State
             "final_health":
@@ -2167,9 +2609,24 @@ class MultiQueryHybridRetriever:
             "final_answerability":
                 final_answerability_score,
 
+            "final_risk_score":
+                final_health.get(
+                    "risk_score",
+                    0.0
+                ),
+
             # Improvement
             "answerability_delta":
                 answerability_delta,
+
+            "retry_improved_answerability":
+                answerability_delta > 0,
+
+            "retry_improved_relevance":
+                relevance_delta > 0,
+
+            "retry_improved_relevance":
+                relevance_delta > 0,
 
             "initial_relevance":
                 initial_relevance_score,
@@ -2195,6 +2652,8 @@ class MultiQueryHybridRetriever:
                     "confidence",
                     "unknown"
                 ),
+
+        
         }
 
         self.metrics_logger.log(event)
@@ -2446,7 +2905,7 @@ class MultiQueryHybridRetriever:
         #     for source, count in stage["source_distribution"].items():
         #         print(f"    {source}: {count}")
 
-       
+
 
     def print_adaptive_result(self, adaptive_result):
         """
@@ -2598,26 +3057,26 @@ if __name__ == "__main__":
             "who invented transformers?",
             "explain retrieval augmented generation",
             "fix my wifi router",
-            "explain faiss",
-            "how does reranking work in retrieval pipelines",
-            "what is colbERT",
-            "what is ragas evaluation?",
-            "what is splade?"   
-            "how do embeddings work?",
-            "what are some core evaluation metrics for retrieval systems?",
-            "what are text splitters and why are they important?",
-            "explain two main RAG architectures",
-            "what is lost in the middle concept in RAG?",
-            "what is machine learning?",
-            "what is python?",
-            "what is the capital of India?",
-            "what are some limitations of RAG?",
-            "what is agentic RAG?",
-            "explain all about transformers",
-            "what is self attention in transformers?",
-            "why is positional encoding needed in transformers?",
-            "what is langchain?",
-            "explain hybrid retrieval in RAG"
+            # "explain faiss",
+            # "how does reranking work in retrieval pipelines",
+            # "what is colbERT",
+            # "what is ragas evaluation?",
+            # "what is splade?"
+            # "how do embeddings work?",
+            # "what are some core evaluation metrics for retrieval systems?",
+            # "what are text splitters and why are they important?",
+            # "explain two main RAG architectures",
+            # "what is lost in the middle concept in RAG?",
+            # "what is machine learning?",
+            # "what is python?",
+            # "what is the capital of India?",
+            # "what are some limitations of RAG?",
+            # "what is agentic RAG?",
+            # "explain all about transformers",
+            # "what is self attention in transformers?",
+            # "why is positional encoding needed in transformers?",
+            # "what is langchain?",
+            # "explain hybrid retrieval in RAG"
 ]
 
     # test_queries = [
@@ -2696,7 +3155,7 @@ if __name__ == "__main__":
         print(f"Reduction %       : {reduction_pct:.2f}%")
 
 
-        # Use the compressed context for answer generation to simulate the full pipeline 
+        # Use the compressed context for answer generation to simulate the full pipeline
         # and see how the confidence route info can be passed to the generator for potential answer-level adjustments
 
         print("\n==================================================")
@@ -2753,10 +3212,23 @@ if __name__ == "__main__":
             confidence_route=result.get("confidence_route", {}),
             already_compressed=True,
     )
-        
+
         print("\n==================================================")
         print("FINAL LLM ANSWER")
         print("==================================================")
 
         print(answer)
+
+# if __name__ == "__main__":
+
+#     query = "what is bm25"
+
+#     retriever = MultiQueryHybridRetriever()
+
+#     result = retriever.search_with_diagnostics(
+#         query=query
+#     )
+
+#     print("\nCACHE INFO")
+#     print(result["diagnostics"]["cache"])
 

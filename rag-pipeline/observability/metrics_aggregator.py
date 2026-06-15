@@ -5,12 +5,28 @@ from collections import Counter
 
 class MetricsAggregator:
 
+
     def __init__(self):
 
         self.log_file = (
             Path(__file__).resolve().parent
             / "query_metrics.jsonl"
         )
+
+
+    def percentile(self, values, percentile):
+
+        if not values:
+            return 0
+
+        values = sorted(values)
+
+        index = int(
+            (percentile / 100)
+            * (len(values) - 1)
+        )
+
+        return values[index]
 
     def load_events(self):
 
@@ -47,6 +63,154 @@ class MetricsAggregator:
             return
 
         total_queries = len(events)
+
+        cache_hits = sum(
+            e.get(
+                "query_cache_hit",
+                False
+            )
+            for e in events
+        )
+
+        cache_misses = total_queries - cache_hits
+
+        cache_hit_rate = (
+            cache_hits / total_queries
+            if total_queries
+            else 0
+        )
+
+        total_latency_saved_ms = sum(
+            e.get(
+                "query_cache_latency_saved_ms",
+                0
+            )
+            for e in events
+        )
+
+        avg_latency_saved_ms = (
+            total_latency_saved_ms
+            / cache_hits
+            if cache_hits
+            else 0
+        )
+
+        retrieval_latencies = [
+            e.get(
+                "retrieval_latency_ms",
+                0
+            )
+            for e in events
+        ]
+
+        query_expansion_latencies = [
+            e.get("query_expansion_latency_ms", 0)
+            for e in events
+        ]
+
+        avg_query_expansion_latency = (
+            sum(query_expansion_latencies)
+            / len(query_expansion_latencies)
+        )
+
+        avg_domain_fit = (
+        sum(
+            e.get(
+                "domain_fit",
+                0
+            )
+            for e in events
+        )
+        / total_queries
+    )
+
+        total_latencies = [
+            e.get(
+                "total_search_latency_ms",
+                0
+            )
+            for e in events
+        ]
+
+        avg_retrieval_latency = (
+            sum(retrieval_latencies)
+            / len(retrieval_latencies)
+        )
+
+        avg_total_latency = (
+            sum(total_latencies)
+            / len(total_latencies)
+        )
+
+        p50_latency = self.percentile(
+            total_latencies,
+            50
+        )
+
+        p95_latency = self.percentile(
+            total_latencies,
+            95
+        )
+
+        rerank_latencies = [
+            e.get("rerank_latency_ms", 0)
+            for e in events
+        ]
+
+        avg_rerank_latency = (
+            sum(rerank_latencies)
+            / len(rerank_latencies)
+        )
+
+        p95_rerank_latency = self.percentile(
+            rerank_latencies,
+            95
+        )
+
+        rerank_candidate_counts = [
+            e.get("rerank_candidates_count", 0)
+            for e in events
+        ]
+
+        avg_rerank_candidates = (
+            sum(rerank_candidate_counts)
+            / len(rerank_candidate_counts)
+        )
+
+        latency_per_candidate_values = [
+            e.get("latency_per_candidate_ms", 0)
+            for e in events
+        ]
+
+        avg_latency_per_candidate = (
+            sum(latency_per_candidate_values)
+            / len(latency_per_candidate_values)
+        )
+
+        diagnostics_latencies = [
+            e.get("diagnostics_latency_ms", 0)
+            for e in events
+        ]
+
+        avg_diagnostics_latency = (
+            sum(diagnostics_latencies)
+            / len(diagnostics_latencies)
+        )
+
+
+        retry_latencies = [
+            e.get("retry_latency_ms", 0)
+            for e in events
+            if e.get("used_retry", False)
+        ]
+
+        avg_retry_latency = (
+            sum(retry_latencies)
+            / len(retry_latencies)
+            if retry_latencies
+            else 0
+        )
+
 
         retry_events = [
             e
@@ -91,6 +255,14 @@ class MetricsAggregator:
 
         intent_counts = Counter(
             e["intent"]
+            for e in events
+        )
+
+        confidence_action_counts = Counter(
+            e.get(
+                "confidence_action",
+                "unknown"
+            )
             for e in events
         )
 
@@ -155,15 +327,227 @@ class MetricsAggregator:
             / total_queries
         )
 
+        avg_initial_risk = (
+            sum(
+                e.get(
+                    "initial_risk_score",
+                    0
+                )
+                for e in events
+            )
+            / total_queries
+        )
+
+        avg_final_risk = (
+            sum(
+                e.get(
+                    "final_risk_score",
+                    0
+                )
+                for e in events
+            )
+            / total_queries
+        )
+
+        avg_expanded_queries = (
+            sum(
+                e.get(
+                    "expanded_queries_count",
+                    0
+                )
+                for e in events
+            )
+            / total_queries
+        )
+
+        avg_merged_candidates = (
+            sum(
+                e.get(
+                    "merged_candidates",
+                    0
+                )
+                for e in events
+            )
+            / total_queries
+        )
+
+        avg_reranked_candidates = (
+            sum(
+                e.get(
+                    "reranked_candidates",
+                    0
+                )
+                for e in events
+            )
+            / total_queries
+        )
+
+        avg_context_chunks = (
+            sum(
+                e.get(
+                    "context_chunks",
+                    0
+                )
+                for e in events
+            )
+            / total_queries
+        )
+
         print("\n" + "=" * 50)
         print("OBSERVABILITY REPORT")
         print("=" * 50)
 
         print(f"\nTotal Queries: {total_queries}")
 
+        print("\nRETRIEVAL SIZES")
+
+        print(
+            f"Average Expanded Queries: "
+            f"{avg_expanded_queries:.2f}"
+        )
+
+        print(
+            f"Average Merged Candidates: "
+            f"{avg_merged_candidates:.2f}"
+        )
+
+        print(
+            f"Average Reranked Candidates: "
+            f"{avg_reranked_candidates:.2f}"
+        )
+
+        print(
+            f"Average Context Chunks: "
+            f"{avg_context_chunks:.2f}"
+        )
+
+        print("\nCACHE REPORT")
+
+        print(
+            f"Cache Hits: "
+            f"{cache_hits}"
+        )
+
+        print(
+            f"Cache Misses: "
+            f"{cache_misses}"
+        )
+
+        print(
+            f"Cache Hit Rate: "
+            f"{cache_hit_rate:.2%}"
+        )
+
+        retrieval_cache_hits = sum(
+            e.get(
+                "retrieval_cache_hit",
+                False
+            )
+            for e in events
+        )
+
+        retrieval_cache_hit_rate = (
+            retrieval_cache_hits
+            / total_queries
+            if total_queries
+            else 0
+        )
+
+        print(
+            f"Retrieval Cache Hit Rate: "
+            f"{retrieval_cache_hit_rate:.2%}"
+        )
+
+        print(
+            f"Total Latency Saved: "
+            f"{total_latency_saved_ms:.2f} ms"
+        )
+
+        print(
+            f"Average Latency Saved Per Hit: "
+            f"{avg_latency_saved_ms:.2f} ms"
+        )
+
+        print("\nLATENCY REPORT")
+
+        print(
+            f"Average Retrieval Latency: "
+            f"{avg_retrieval_latency:.2f} ms"
+        )
+
+        print(
+            f"Average Total Latency: "
+            f"{avg_total_latency:.2f} ms"
+        )
+
+        print(
+            f"P50 Latency: "
+            f"{p50_latency:.2f} ms"
+        )
+
+        print(
+            f"P95 Latency: "
+            f"{p95_latency:.2f} ms"
+        )
+
+        print(
+            f"Average Rerank Latency: "
+            f"{avg_rerank_latency:.2f} ms"
+        )
+
+        print(
+            f"P95 Rerank Latency: "
+            f"{p95_rerank_latency:.2f} ms"
+        )
+
+        print(
+            f"Average Rerank Candidates: "
+            f"{avg_rerank_candidates:.2f}"
+        )
+
+        print(
+            f"Average Latency Per Candidate: "
+            f"{avg_latency_per_candidate:.2f} ms"
+        )
+
+        print(
+            f"Average Retry Latency: "
+            f"{avg_retry_latency:.2f} ms"
+        )
+
+        print(
+            f"Average Query Expansion Latency: "
+            f"{avg_query_expansion_latency:.2f} ms"
+        )
+
+        print(
+            f"Average Diagnostics Latency: "
+            f"{avg_diagnostics_latency:.2f} ms"
+        )
+
+
         print("\nIntent Distribution:")
         for k, v in intent_counts.items():
             print(f"  {k}: {v}")
+
+        print("\nDOMAIN GATE")
+
+        print(
+            f"Average Domain Fit: "
+            f"{avg_domain_fit:.3f}"
+        )
+
+        print("\nCONFIDENCE ROUTING")
+
+        for action, count in confidence_action_counts.items():
+
+            pct = count / total_queries
+
+            print(
+                f"  {action}: "
+                f"{count} "
+                f"({pct:.2%})"
+            )
 
         print("\nStrategy Distribution:")
         for k, v in strategy_counts.items():
@@ -188,6 +572,18 @@ class MetricsAggregator:
         )
 
         retried_queries = retry_events
+
+        print("\nRISK ANALYSIS")
+
+        print(
+            f"Average Initial Risk: "
+            f"{avg_initial_risk:.3f}"
+        )
+
+        print(
+            f"Average Final Risk: "
+            f"{avg_final_risk:.3f}"
+        )
 
         print("\nRETRIED QUERIES:")
 
