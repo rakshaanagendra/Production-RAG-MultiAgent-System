@@ -918,6 +918,7 @@ class MultiQueryHybridRetriever:
         max_per_source: Optional[int] = 3,
         context_top_k: int = 5,
         include_scores: bool = True,
+        skip_retrieval_cache=False,
     ):
         """
         Multi-query hybrid retrieval with structured diagnostics.
@@ -1021,10 +1022,28 @@ class MultiQueryHybridRetriever:
 
         # if exists:
 
-        if self.retrieval_cache.exists(
-            query,
-            strategy_name,
+        print("\nCACHE KEY DEBUG")
+        print(f"query={query}")
+        print(f"strategy={strategy_name}")
+        print(f"retrieve_k={strategy_params['retrieve_k']}")
+        print(f"final_k={strategy_params['final_k']}")
+        print(f"num_queries={strategy_params['num_queries']}")
+
+        # Initially we got retry success rate as 0%
+        # Issue was weak retrieval detected -- retry requested -- cache hit -- same retrieval result -- same diagnostics -- no improvement
+        # And this adaptive retrieval never actually ran
+        # But now we are temporarily disabling retrieval cache during retries to break this loop and get some data on how well the 
+        # adaptive retrieval is working and whether it is improving retrieval quality and diagnostics on retry attempts
+
+
+        if (
+            not skip_retrieval_cache
+            and self.retrieval_cache.exists(
+                query,
+                strategy_name
+            )
         ):
+        
 
             cached_result = self.retrieval_cache.get(
                 query,
@@ -1035,7 +1054,9 @@ class MultiQueryHybridRetriever:
 
                 retrieval_cache_hit = True
 
-                print("[RETRIEVAL CACHE] Hit=True")
+                print("[RETRIEVAL CACHE] HIT")
+                print(f"query={query}")
+                print(f"strategy={strategy_name}")
 
                 cached_result["diagnostics"]["cache"][
                     "retrieval_cache_hit"
@@ -2111,6 +2132,12 @@ class MultiQueryHybridRetriever:
         # Measure retry cost
         retry_start = time.perf_counter()
 
+        print("\nRETRY EXECUTION")
+        print(f"retrieve_k={retry_policy['retrieve_k']}")
+        print(f"final_k={chosen_final_k}")
+        print(f"num_queries={retry_policy['num_queries']}")
+        print("skip_retrieval_cache=True")
+
         retry_result = self.search_with_diagnostics(
             query=query,
             num_queries=retry_policy["num_queries"],
@@ -2125,6 +2152,65 @@ class MultiQueryHybridRetriever:
             max_per_source=retry_policy["max_per_source"],
             context_top_k=chosen_context_top_k,
             include_scores=include_scores,
+            skip_retrieval_cache=True
+        )
+
+        # We want proof that retry is actually doing something different than the initial retrieval and not just returning 
+        # the same results due to cache or some other issue, so we compute the overlap between the initial retrieved 
+        # chunks and the retry retrieved chunks as a sanity check. If there is very high overlap then it could 
+        # indicate an issue with the retry logic.
+
+        initial_chunks = initial_result["diagnostics"]["reranked_chunks"]
+        retry_chunks = retry_result["diagnostics"]["reranked_chunks"]
+
+        initial_texts = {
+            c.get("text", "")[:100]
+            for c in initial_chunks
+        }
+
+        retry_texts = {
+            c.get("text", "")[:100]
+            for c in retry_chunks
+        }
+
+        overlap = len(
+            initial_texts & retry_texts
+        )
+
+        union = len(
+            initial_texts | retry_texts
+        )
+
+        overlap_ratio = overlap / max(union, 1)
+
+        print("\nRETRY OVERLAP")
+        print(f"overlap_ratio={overlap_ratio:.2f}")
+
+        initial_merged = {
+            c.get("text", "")[:100]
+            for c in initial_result["diagnostics"]["merged_chunks"]
+        }
+
+        retry_merged = {
+            c.get("text", "")[:100]
+            for c in retry_result["diagnostics"]["merged_chunks"]
+        }
+
+        overlap_on_merged = len(initial_merged & retry_merged)
+
+        union_merged = len(initial_merged | retry_merged)
+
+        overlap_merged_ratio = overlap_on_merged / max(union_merged, 1)
+
+        print("\nRETRY OVERLAP ON MERGED CHUNKS")
+        print(f"overlap_merged_ratio={overlap_merged_ratio:.2f}")
+
+        print(
+            f"\nINITIAL ANSWERABILITY SCORE: {initial_result['diagnostics']['answerability']['score']}"
+        )
+
+        print(
+            f"RETRY ANSWERABILITY SCORE: {retry_result['diagnostics']['answerability']['score']}"
         )
 
         retry_latency_ms = round(
@@ -2739,20 +2825,26 @@ class MultiQueryHybridRetriever:
         # print(f"  merged_chunks   : {len(fused_results)}")
         # print(f"  reranked_chunks : {len(reranked_chunks)}")
 
-        # for i, chunk in enumerate(fused_results[:20], start=1):
-        #     source = chunk.get("source", "unknown")
 
-        #     text = chunk.get("text", "")
-        #     preview = text[:150].replace("\n", " ")
+        print("\n==================================================")
+        print("RERANKED RESULTS")
+        print("==================================================")
 
-        #     print(f"\n[{i}] {source}")
-        #     print(preview)
+        reranked = diag["reranked_results"]
+        reranked_chunks = diag["reranked_chunks"]
 
-        # print("\n==================================================")
-        # print("RERANKED RESULTS")
-        # print("==================================================")
+        for i, chunk in enumerate(reranked_chunks[:6], start=1):
 
-        # reranked = diag["reranked_results"]
+            source = chunk.get("source", "unknown")
+            score = chunk.get("rerank_score", 0.0)
+
+            text = chunk.get("text", "")
+            preview = text[:300].replace("\n", " ")
+
+            print(f"\n[{i}]")
+            print(f"Source: {source}")
+            print(f"Rerank Score: {score:.4f}")
+            print(preview)
 
         # print(f"Reranked Count: {reranked['count']}")
 
@@ -2760,8 +2852,8 @@ class MultiQueryHybridRetriever:
         # for source, count in reranked["source_distribution"].items():
         #     print(f"  {source}: {count}")
 
-        # print("\nTop Rerank Scores:")
-        # print(reranked["top_rerank_scores"])
+        print("\nTop Rerank Scores:")
+        print(reranked["top_rerank_scores"])
 
         # print("\n==================================================")
         # print("RERANK ANALYSIS")
@@ -3050,13 +3142,13 @@ if __name__ == "__main__":
 
     # For adaptive search testing, use queries that are more likely to trigger reason-aware retrieval
     test_queries = [
-            "what is bm25",
-            "bm25 vs sparse retrieval",
-            "how do vector databases work",
-            "when was RAG introduced?",
+            # "what is bm25",
+            # "bm25 vs sparse retrieval",
+            # "how do vector databases work",
+            # "when was RAG introduced?",
             "who invented transformers?",
-            "explain retrieval augmented generation",
-            "fix my wifi router",
+            # "explain retrieval augmented generation",
+            # "fix my wifi router",
             # "explain faiss",
             # "how does reranking work in retrieval pipelines",
             # "what is colbERT",
@@ -3069,7 +3161,7 @@ if __name__ == "__main__":
             # "what is lost in the middle concept in RAG?",
             # "what is machine learning?",
             # "what is python?",
-            # "what is the capital of India?",
+            "what is the capital of India?",
             # "what are some limitations of RAG?",
             # "what is agentic RAG?",
             # "explain all about transformers",
