@@ -47,6 +47,8 @@ vectorstore/
 # Data Files
 data/raw/
 data/processed/
+data/pdfs/
+data/queries/
 
 # Cache
 .cache/
