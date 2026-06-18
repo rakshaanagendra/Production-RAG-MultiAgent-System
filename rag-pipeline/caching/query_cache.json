@@ -1,124 +1,29 @@
 {
-  "what is bm25": [
-    "what is bm25",
-    "bm25 algorithm",
-    "bm25 formula",
-    "bm25 in information retrieval"
+  "what is react and how does it work?": [
+    "What is ReAct and how does it work?"
   ],
-  "bm25 vs sparse retrieval": [
-    "bm25 vs sparse retrieval",
-    "bm25 vs dense retrieval",
-    "sparse retrieval vs bm25"
+  "what problem does toolformer solve?": [
+    "What problem does Toolformer solve?",
+    "toolformer problems addressed",
+    "toolformer solves what issues",
+    "use cases of toolformer"
   ],
-  "how do vector databases work": [
-    "how do vector databases work",
-    "vector database architecture",
-    "vector db indexing methods",
-    "vector similarity search algorithms"
+  "what is reflexion?": [
+    "What is Reflexion?"
   ],
-  "when was rag introduced?": [
-    "when was RAG introduced?"
+  "what is self-challenging?": [
+    "What is Self-challenging?"
   ],
-  "who invented transformers?": [
-    "who invented transformers?",
-    "transformer architecture inventor",
-    "early history of transformer models",
-    "originator of transformer neural networks"
+  "what is lora?": [
+    "What is LoRA?"
   ],
-  "explain retrieval augmented generation": [
-    "explain retrieval augmented generation"
+  "what is qlora?": [
+    "What is QLoRA?"
   ],
-  "explain faiss": [
-    "explain faiss",
-    "faiss indexing",
-    "faiss similarity search",
-    "faiss vector database"
+  "what is flashattention?": [
+    "What is FlashAttention?"
   ],
-  "how does reranking work in retrieval pipelines": [
-    "how does reranking work in retrieval pipelines"
-  ],
-  "what is colbert": [
-    "what is colbERT",
-    "colBERT technical overview",
-    "colBERT neural network architecture",
-    "colBERT model implementation details"
-  ],
-  "what is ragas evaluation?": [
-    "what is ragas evaluation?",
-    "ragas evaluation metrics",
-    "ragas performance assessment methods",
-    "ragas scoring criteria"
-  ],
-  "what is splade?how do embeddings work?": [
-    "what is splade?how do embeddings work?",
-    "splade overview",
-    "embeddings in machine learning",
-    "splade technical details"
-  ],
-  "what are some core evaluation metrics for retrieval systems?": [
-    "what are some core evaluation metrics for retrieval systems?"
-  ],
-  "what are text splitters and why are they important?": [
-    "what are text splitters and why are they important?"
-  ],
-  "explain two main rag architectures": [
-    "explain two main RAG architectures"
-  ],
-  "what is lost in the middle concept in rag?": [
-    "what is lost in the middle concept in RAG?",
-    "middle concept loss RAG",
-    "RAG missing concepts analysis",
-    "RAG conceptual gaps"
-  ],
-  "what is machine learning?": [
-    "what is machine learning?",
-    "machine learning definition",
-    "fundamentals of machine learning",
-    "key concepts in machine learning"
-  ],
-  "what is python?": [
-    "what is python?",
-    "python language definition",
-    "fundamentals of python programming",
-    "basic syntax in python"
-  ],
-  "what is the capital of india?": [
-    "what is the capital of India?"
-  ],
-  "what are some limitations of rag?": [
-    "what are some limitations of RAG?"
-  ],
-  "what is agentic rag?": [
-    "what is agentic RAG?"
-  ],
-  "explain all about transformers": [
-    "explain all about transformers",
-    "transformers deep dive",
-    "transformer architecture details",
-    "exploring transformer models"
-  ],
-  "what is self attention in transformers?": [
-    "what is self attention in transformers?",
-    "self-attention transformers",
-    "transformers self-attention mechanism",
-    "introduction to transformer self-attention"
-  ],
-  "why is positional encoding needed in transformers?": [
-    "why is positional encoding needed in transformers?",
-    "position embedding transformers",
-    "need for position encoding in transformer models",
-    "transformer positional encodings importance"
-  ],
-  "what is langchain?": [
-    "what is langchain?",
-    "langchain overview",
-    "langchain features",
-    "langchain use cases"
-  ],
-  "explain hybrid retrieval in rag": [
-    "explain hybrid retrieval in RAG",
-    "rag hybrid retrieval",
-    "rag sparse dense hybrid",
-    "rag hybrid ranking"
+  "what is dense and sparse retrieval?": [
+    "What is dense and sparse retrieval?"
   ]
 }

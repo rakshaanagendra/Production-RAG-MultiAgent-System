@@ -1,5 +1,7 @@
 import sys
 from pathlib import Path
+import time
+from collections import Counter
 
 # Allow running this file directly: `python scripts/ingest.py`
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +18,7 @@ from vectorstore.faiss_indexer import build_faiss_index, save_index
 
 
 def run_ingestion():
+    start_time = time.time()
     data_path = PROJECT_ROOT / "data" / "raw"
     processed_path = PROJECT_ROOT / "data" / "processed"
 
@@ -44,7 +47,26 @@ def run_ingestion():
     print("Saving index...")
     save_index(index, mapping, str(processed_path))
 
-    print("Ingestion complete!")
+    print("\n========== INGESTION SUMMARY ==========")
+    print(f"Documents Loaded : {len(docs)}")
+    print(f"Chunks Created   : {len(chunks)}")
+    print(f"Embeddings       : {len(embeddings)}")
+    print(f"Vector Dimension : {index.d}")
+    print(f"Index Saved To   : {processed_path}")
+    print("=======================================")
+    elapsed = time.time() - start_time
+
+    print(f"Ingestion Time: {elapsed:.2f} seconds")
+
+    category_counts = Counter(
+        chunk.get("category", "unknown")
+        for chunk in chunks
+        )
+
+    print("\nCategory Distribution:")
+
+    for category, count in category_counts.items():
+            print(f"{category}: {count}")
 
 
 if __name__ == "__main__":

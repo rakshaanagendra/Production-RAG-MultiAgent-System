@@ -82,8 +82,8 @@ def is_weak_chunk(chunk):
 
 def chunk_documents(documents):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=700,
-        chunk_overlap=150,
+        chunk_size=1000,
+        chunk_overlap=250,
         separators=["\n\n", "\n", " ", ""],
     )
 
@@ -104,9 +104,14 @@ def chunk_documents(documents):
                     continue
 
                 chunk_data = {
+                    "title": doc.get("title"),
                     "text": chunk,
+                    "word_count": len(
+                        re.findall(r"\b\w+\b", chunk)
+                    ),
                     "source": doc.get("source", "unknown"),
                     "source_path": doc.get("source_path", ""),
+                    "category": doc.get("category"),
                     "doc_type": doc.get("doc_type", "unknown"),
                     "doc_id": doc_id,
                     "chunk_id": chunk_id,

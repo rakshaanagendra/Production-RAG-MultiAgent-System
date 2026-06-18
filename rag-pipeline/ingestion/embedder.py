@@ -17,7 +17,12 @@ model = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
 def embed_chunks(chunks):
     texts = [chunk["text"] for chunk in chunks]
-    embeddings = model.encode(texts, show_progress_bar=True, normalize_embeddings=True)
+    embeddings = model.encode(
+        texts, 
+        batch_size=32,
+        show_progress_bar=True, 
+        normalize_embeddings=True
+        )
 
     return embeddings
 

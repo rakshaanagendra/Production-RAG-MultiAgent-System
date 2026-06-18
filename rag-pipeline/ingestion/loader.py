@@ -1,7 +1,14 @@
 import os
+import re
 import json
 
-# Try both PDF loaders (safe fallback)
+# ---------------- PDF Loaders ---------------- #
+
+try:
+    from langchain_community.document_loaders import UnstructuredPDFLoader
+except Exception:
+    UnstructuredPDFLoader = None
+
 try:
     import fitz  # PyMuPDF
 except Exception:
@@ -12,111 +19,322 @@ try:
 except Exception:
     PdfReader = None
 
-try:
-    from langchain_community.document_loaders import UnstructuredPDFLoader
-except Exception:
-    UnstructuredPDFLoader = None
+
+# ---------------- Cleaning ---------------- #
+
+def clean_text(text: str) -> str:
+    """
+    Basic normalization for PDFs and TXT files.
+    Keeps content while removing obvious extraction noise.
+    """
+
+    if not text:
+        return ""
+
+    # normalize line endings
+    text = text.replace("\r\n", "\n")
+    text = text.replace("\r", "\n")
+
+    # remove excessive blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # remove excessive spaces/tabs
+    text = re.sub(r"[ \t]+", " ", text)
+
+    # remove common page markers
+    text = re.sub(
+        r"Page\s+\d+(\s+of\s+\d+)?",
+        "",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    text = text.encode("utf-8", errors="ignore").decode("utf-8")
+
+    return text.strip()
 
 
-def load_documents(data_path="data/raw"):
+# ---------------- TXT Loader ---------------- #
+
+def load_txt_file(file_path, file_name, category):
+
     documents = []
 
-    for root, _, files in os.walk(data_path):
-        for file in files:
-            file_path = os.path.join(root, file)
+    try:
+        with open(
+            file_path,
+            "r",
+            encoding="utf-8",
+            errors="ignore"
+        ) as f:
 
-            # ---------------- TXT ----------------
-            if file.endswith(".txt"):
-                with open(file_path, "r", encoding="utf-8") as f:
-                    text = f.read().strip()
+            text = clean_text(f.read())
 
-                if text:
-                    documents.append({
-                        "text": text,
-                        "source": file,
-                        "source_path": file_path,
-                        "doc_type": "txt",
-                        "page": None
-                    })
+        if text:
 
-            # ---------------- PDF ----------------
-            elif file.endswith(".pdf"):
-                if UnstructuredPDFLoader is not None:
-                    try:
-                        # Use element mode to preserve richer PDF structure and metadata.
-                        loader = UnstructuredPDFLoader(file_path=file_path, mode="elements")
-                        elements = loader.load()
+            documents.append({
+                "text": text,
+                "source": file_name,
+                "title": os.path.splitext(file_name)[0],
+                "source_path": file_path,
+                "category": category,
+                "doc_type": "txt",
+                "page": None
+            })
 
-                        for idx, element in enumerate(elements, start=1):
-                            page_text = (getattr(element, "page_content", "") or "").strip()
-                            metadata = getattr(element, "metadata", {}) or {}
-                            page_num = metadata.get("page_number") or metadata.get("page") or idx
-
-                            if page_text:
-                                documents.append({
-                                    "text": page_text,
-                                    "source": file,
-                                    "source_path": file_path,
-                                    "doc_type": "pdf",
-                                    "page": page_num
-                                })
-                        continue
-                    except Exception:
-                        # Fall back to local PDF parsers if unstructured is installed but fails.
-                        pass
-
-                if fitz is not None:
-                    doc = fitz.open(file_path)
-
-                    for page_num in range(len(doc)):
-                        page = doc[page_num]
-                        page_text = page.get_text()
-
-                        if not isinstance(page_text, str):
-                            page_text = ""
-
-                        page_text = page_text.strip()
-
-                        if page_text:
-                            documents.append({
-                                "text": page_text,
-                                "source": file,
-                                "source_path": file_path,
-                                "doc_type": "pdf",
-                                "page": page_num
-                            })
-
-                elif PdfReader is not None:
-                    reader = PdfReader(file_path)
-
-                    for page_num, page in enumerate(reader.pages, start=1):
-                        page_text = page.extract_text() or ""
-                        page_text = page_text.strip()
-
-                        if page_text:
-                            documents.append({
-                                "text": page_text,
-                                "source": file,
-                                "source_path": file_path,
-                                "doc_type": "pdf",
-                                "page": page_num
-                            })
+    except Exception as e:
+        print(f"[TXT ERROR] {file_name}: {e}")
 
     return documents
 
 
+# # ---------------- Unstructured Loader ---------------- #
+
+# def load_pdf_unstructured(file_path, file_name, category):
+
+#     documents = []
+
+#     if UnstructuredPDFLoader is None:
+#         return documents
+
+#     try:
+
+#         loader = UnstructuredPDFLoader(
+#             file_path=file_path,
+#             mode="elements"
+#         )
+
+#         elements = loader.load()
+
+#         for idx, element in enumerate(elements, start=1):
+
+#             page_text = clean_text(
+#                 getattr(element, "page_content", "")
+#             )
+
+#             metadata = getattr(
+#                 element,
+#                 "metadata",
+#                 {}
+#             ) or {}
+
+#             page_num = (
+#                 metadata.get("page_number")
+#                 or metadata.get("page")
+#                 or idx
+#             )
+
+#             if len(page_text) < 30:
+#                 continue
+
+#             documents.append({
+#                 "text": page_text,
+#                 "source": file_name,
+#                 "title": os.path.splitext(file_name)[0],
+#                 "source_path": file_path,
+#                 "category": category,
+#                 "doc_type": "pdf",
+#                 "page": page_num
+#             })
+
+#         if documents:
+#             print(f"[UNSTRUCTURED] {file_name}")
+
+#         return documents
+
+#     except Exception as e:
+
+#         print(
+#             f"[UNSTRUCTURED FAILED] "
+#             f"{file_name}: {e}"
+#         )
+
+#         return []
+
+
+# ---------------- PyMuPDF Loader ---------------- #
+
+def load_pdf_pymupdf(file_path, file_name, category):
+
+    documents = []
+
+    if fitz is None:
+        return documents
+
+    try:
+
+        doc = fitz.open(file_path)
+
+        for page_num in range(len(doc)):
+
+            page = doc[page_num]
+
+            page_text = page.get_text("text")
+
+            if not isinstance(page_text, str):
+                page_text = ""
+
+            page_text = clean_text(page_text)
+
+            if len(page_text) < 30:
+                continue
+
+            documents.append({
+                "text": page_text,
+                "source": file_name,
+                "title": os.path.splitext(file_name)[0],
+                "source_path": file_path,
+                "category": category,
+                "doc_type": "pdf",
+                "page": page_num + 1
+            })
+
+        if documents:
+            print(f"[PYMUPDF] {file_name}")
+
+        return documents
+
+    except Exception as e:
+
+        print(
+            f"[PYMUPDF FAILED] "
+            f"{file_name}: {e}"
+        )
+
+        return []
+
+
+# ---------------- PyPDF Loader ---------------- #
+
+def load_pdf_pypdf(file_path, file_name, category):
+
+    documents = []
+
+    if PdfReader is None:
+        return documents
+
+    try:
+
+        reader = PdfReader(file_path)
+
+        for page_num, page in enumerate(
+            reader.pages,
+            start=1
+        ):
+
+            page_text = clean_text(
+                page.extract_text() or ""
+            )
+
+            if len(page_text) < 30:
+                continue
+
+            documents.append({
+                "text": page_text,
+                "source": file_name,
+                "title": os.path.splitext(file_name)[0],
+                "source_path": file_path,
+                "category": category,
+                "doc_type": "pdf",
+                "page": page_num
+            })
+
+        if documents:
+            print(f"[PYPDF] {file_name}")
+
+        return documents
+
+    except Exception as e:
+
+        print(
+            f"[PYPDF FAILED] "
+            f"{file_name}: {e}"
+        )
+
+        return []
+
+
+# ---------------- Main Loader ---------------- #
+
+def load_documents(data_path="data/raw"):
+
+    documents = []
+
+    for root, _, files in os.walk(data_path):
+
+        category = os.path.basename(root)
+
+        for file_name in files:
+
+            file_path = os.path.join(
+                root,
+                file_name
+            )
+
+            # ---------- TXT ---------- #
+
+            if file_name.lower().endswith(".txt"):
+
+                documents.extend(
+                    load_txt_file(
+                        file_path,
+                        file_name,
+                        category
+                    )
+                )
+
+            # ---------- PDF ---------- #
+
+            elif file_name.lower().endswith(".pdf"):
+
+                pdf_docs = load_pdf_pymupdf(
+                    file_path,
+                    file_name,
+                    category
+                )
+
+                if not pdf_docs:
+
+                    pdf_docs = load_pdf_pypdf(
+                        file_path,
+                        file_name,
+                        category
+                    )
+
+                documents.extend(pdf_docs)
+
+    return documents
+
+
+# ---------------- Debug ---------------- #
+
 if __name__ == "__main__":
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    resolved_data_path = os.path.join(project_root, "data", "raw")
 
-    documents = load_documents(resolved_data_path)
-    print(f"Loaded {len(documents)} document(s) from: {resolved_data_path}")
+    project_root = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            ".."
+        )
+    )
 
-    if UnstructuredPDFLoader is None and fitz is None and PdfReader is None:
-        print("PDF parsing is disabled. Install unstructured, PyMuPDF, or pypdf to include .pdf files.")
+    data_path = os.path.join(
+        project_root,
+        "data",
+        "raw"
+    )
 
-    if not documents:
-        print("No loadable .txt/.pdf files were found.")
-    else:
-        for doc in documents[:5]:
-            print(json.dumps(doc, ensure_ascii=False, indent=2))
+    docs = load_documents(data_path)
+
+    print("\n" + "=" * 60)
+    print(f"Loaded {len(docs)} documents")
+    print("=" * 60)
+
+    if docs:
+        print(
+            json.dumps(
+                docs[0],
+                indent=2,
+                ensure_ascii=False
+            )
+        )

@@ -3142,33 +3142,83 @@ if __name__ == "__main__":
 
     # For adaptive search testing, use queries that are more likely to trigger reason-aware retrieval
     test_queries = [
-            # "what is bm25",
-            # "bm25 vs sparse retrieval",
-            # "how do vector databases work",
-            # "when was RAG introduced?",
-            "who invented transformers?",
-            # "explain retrieval augmented generation",
-            # "fix my wifi router",
-            # "explain faiss",
-            # "how does reranking work in retrieval pipelines",
-            # "what is colbERT",
-            # "what is ragas evaluation?",
-            # "what is splade?"
-            # "how do embeddings work?",
-            # "what are some core evaluation metrics for retrieval systems?",
-            # "what are text splitters and why are they important?",
-            # "explain two main RAG architectures",
-            # "what is lost in the middle concept in RAG?",
-            # "what is machine learning?",
-            # "what is python?",
-            "what is the capital of India?",
-            # "what are some limitations of RAG?",
-            # "what is agentic RAG?",
-            # "explain all about transformers",
-            # "what is self attention in transformers?",
-            # "why is positional encoding needed in transformers?",
-            # "what is langchain?",
-            # "explain hybrid retrieval in RAG"
+
+            # FACT LOOKUP / DEFINITIONS
+
+            "What is ReAct and how does it work?",
+            "What problem does Toolformer solve?",
+            "What is Reflexion?",
+            "What is Self-challenging?",
+            "What is LoRA?",
+            "What is QLoRA?",
+            "What is FlashAttention?",
+            "What is dense and sparse retrieval?",
+
+
+            # # WHO / WHEN / WHERE
+
+            # "Who proposed the ReAct framework?",
+            # "Who introduced Reflexion?",
+            # "Who are the authors of Toolformer?",
+            # "Who invented transformers?",
+            # "When was LoRA introduced?",
+            # "Where was ReAct published?",
+            # "Where was QLoRA published?",
+
+            # # EXPLANATION
+
+            # "Explain Reflexion like I am a beginner.",
+            # "What is agent memory and why is it important?",
+            # "How does Tree of Thoughts work?",
+            # "Explain Graph of Thoughts.",
+            # "What is PagedAttention in vLLM?",
+
+            # # COMPARISON
+
+            # "Compare ReAct and Reflexion.",
+            # "Compare LoRA and QLoRA.",
+            # "Compare RAPTOR and traditional RAG.",
+            # "Compare Self-RAG and Corrective RAG.",
+            # "Compare Toolformer and ReAct.",
+            # "Compare AutoGen and CAMEL.",
+            # "Compare multi-agent systems and single-agent systems.",
+
+            # # HOW TO
+
+            # "How can Reflexion improve an AI system?",
+            # "How do multi-agent systems coordinate tasks?",
+            # "How does Toolformer enable tool usage?",
+            # "How can LoRA be used to fine-tune an LLM?",
+            # "How would I deploy an LLM using vLLM?",
+            # "How would I build an adaptive RAG pipeline?",
+
+            # # MULTI-HOP / SYNTHESIS
+
+            # "How can ReAct and Toolformer be combined to build a tool-using agent?",
+            # "What role does memory play in Reflexion-based agents?",
+            # "How do retrieval quality and reranking affect agent performance?",
+            # "How do RAPTOR and Self-RAG improve retrieval quality?",
+            # "How would you design a production-grade agentic RAG system?",
+            # "How would you architect an AI assistant using RAG, ReAct, and Reflexion?",
+
+            # # EXPLORATION / REASONING
+
+            # "What are the major limitations of ReAct?",
+            # "What are the future directions of multi-agent AI systems?",
+            # "What challenges arise when deploying agentic AI?",
+            # "What techniques improve reliability in AI agents?",
+
+            # # TIMELINE / FACT VERIFICATION
+
+            # "Which came first, ReAct or Reflexion?",
+            # "Which retrieval methods were proposed after the original RAG paper?",
+            # "Did ReAct introduce tool usage in LLMs?",
+            # "Is RAPTOR a retrieval method or a reranking method?",
+
+            # # OOD
+
+            # "What is the capital of India?"
+
 ]
 
     # test_queries = [

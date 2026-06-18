@@ -50,7 +50,17 @@ Rules:
 - Avoid verbose, generic, or overly broad queries.
 - Avoid repeating the same idea in different words.
 - Do not include filler words unless they are essential.
-- Generate at most {num_queries - 1} new queries.
+- Generate EXACTLY {num_queries - 1} new queries.
+- Use different retrieval perspectives (e.g.technical terms, related concepts, subtopics, etc.)
+- Do not invent meaning of an acronym.
+- Do not guess a technical terminology.
+- Prefer terminology that is likely to appear verbatim in technical papers.
+- Prefer official paper terminology over generic descriptions.
+- Use canonical technical names when known.
+- Avoid broad web-search style queries.
+- The entire response must be valid JSON.
+- Make sure the output you give is rooted in the original query but is more retrieval-focused and specific to the dataset.
+- Do not return an empty list.
 - The original query will be added automatically.
 
 Good examples:
@@ -70,6 +80,8 @@ Bad examples:
 User Query:
 {query}
 """.strip()
+        
+        content = ""
 
         try:
             messages = [
@@ -109,7 +121,21 @@ User Query:
             if match:
                 content = match.group(0)
 
-            generated_queries = json.loads(content)
+            print(content)
+
+            try:
+                generated_queries = json.loads(content)
+
+            except json.JSONDecodeError:
+
+                # Fallback for malformed outputs like:
+                # ["query1"], ["query2"], ["query3"]
+                matches = re.findall(r'"([^"]+)"', content)
+
+                if matches:
+                    generated_queries = matches
+                else:
+                    return [query]
 
             if not isinstance(generated_queries, list):
                 return [query]
@@ -125,7 +151,12 @@ User Query:
 
             return generated_queries[:num_queries]
 
-        except Exception:
+        except Exception as e:
+            print("\n[QUERY EXPANSION FAILED]")
+            print(f"Query: {query}")
+            print(f"Raw Output: {content}")
+            print(f"Error: {e}")
+
             return [query]
 
 
@@ -137,7 +168,9 @@ if __name__ == "__main__":
         # "that thing where llms forget the middle part",
         # "how do vector databases work",
         # "bm25 vs embeddings",
-        "who invented transformers?"
+        "What is LoRA?",
+        "What is ReAct?",
+        "What is Toolformer?",
     ]
 
     for query in test_queries:
