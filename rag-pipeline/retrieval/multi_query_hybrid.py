@@ -3145,13 +3145,13 @@ if __name__ == "__main__":
 
             # FACT LOOKUP / DEFINITIONS
 
-            "What is ReAct and how does it work?",
-            "What problem does Toolformer solve?",
-            "What is Reflexion?",
-            "What is Self-challenging?",
-            "What is LoRA?",
-            "What is QLoRA?",
-            "What is FlashAttention?",
+            # "What is ReAct and how does it work?",
+            # "What problem does Toolformer solve?",
+            # "What is Reflexion?",
+            # "What is Self-challenging?",
+            # "What is LoRA?",
+            # "What is QLoRA?",
+            # "What is FlashAttention?",
             "What is dense and sparse retrieval?",
 
 

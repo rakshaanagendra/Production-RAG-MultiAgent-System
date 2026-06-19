@@ -116,13 +116,30 @@ The long-term goal is to evolve this project into a **production-grade Agentic A
 # 🏗️ System Architecture
 
 ```text
+                                ┌─────────────────────┐
+                                │    Knowledge Base   │
+                                │                     │
+                                │ Research Papers     │
+                                │ Technical Notes     │
+                                │ AI Engineering Docs │
+                                │ FAISS Vector Store  │
+                                └──────────┬──────────┘
+                                           │
+                                           ▼
+
 User Query
     │
     ▼
-Intent Analysis
+Query Cache
+    │
+    ▼
+Query Analysis & Domain Gate
     │
     ▼
 Multi-Query Expansion
+    │
+    ▼
+Retrieval Cache
     │
     ▼
 Dense Retrieval + BM25 Sparse Retrieval
@@ -132,6 +149,9 @@ Reciprocal Rank Fusion (RRF)
     │
     ▼
 Cross-Encoder Reranking
+    │
+    ▼
+Context Compression
     │
     ▼
 Retrieval Diagnostics
@@ -150,6 +170,49 @@ Semantic Validation
     │
     ▼
 Final Response
+
+
+┌─────────────────────────────────────────────┐
+│                Observability                │
+├─────────────────────────────────────────────┤
+│ • Query Latency Tracking                    │
+│ • Retrieval Latency Tracking                │
+│ • Reranking Metrics                         │
+│ • Cache Hit/Miss Monitoring                 │
+│ • Retrieval Diagnostics                     │
+│ • Confidence Routing Analytics              │
+│ • Query Logging & Evaluation                │
+└─────────────────────────────────────────────┘
+```
+
+# 📚 Knowledge Base Ingestion Pipeline
+
+```text
+Raw Documents
+(PDFs, Research Papers, Notes)
+            │
+            ▼
+Document Loader
+(PyMuPDF / TXT Loader)
+            │
+            ▼
+Text Cleaning
+            │
+            ▼
+Document Chunking
+            │
+            ▼
+Embedding Generation
+(BAAI/bge-small-en-v1.5)
+            │
+            ▼
+FAISS Index Construction
+            │
+            ▼
+Metadata Store
+            │
+            ▼
+Knowledge Base Ready
 ```
 
 ---
