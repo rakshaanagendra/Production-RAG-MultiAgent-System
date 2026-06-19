@@ -127,63 +127,63 @@ The long-term goal is to evolve this project into a **production-grade Agentic A
                                            │
                                            ▼
 
-User Query
-    │
-    ▼
-Query Cache
-    │
-    ▼
-Query Analysis & Domain Gate
-    │
-    ▼
-Multi-Query Expansion
-    │
-    ▼
-Retrieval Cache
-    │
-    ▼
-Dense Retrieval + BM25 Sparse Retrieval
-    │
-    ▼
-Reciprocal Rank Fusion (RRF)
-    │
-    ▼
-Cross-Encoder Reranking
-    │
-    ▼
-Context Compression
-    │
-    ▼
-Retrieval Diagnostics
-    │
-    ▼
-Answerability Estimation
-    │
-    ▼
-Confidence Routing
-    │
-    ▼
-Grounded Generation
-    │
-    ▼
-Semantic Validation
-    │
-    ▼
-Final Response
+                                        User Query
+                                            │
+                                            ▼
+                                        Query Cache
+                                            │
+                                            ▼
+                                        Query Analysis & Domain Gate
+                                            │
+                                            ▼
+                                        Multi-Query Expansion
+                                            │
+                                            ▼
+                                        Retrieval Cache
+                                            │
+                                            ▼
+                                        Dense Retrieval + BM25 Sparse Retrieval
+                                            │
+                                            ▼
+                                        Reciprocal Rank Fusion (RRF)
+                                            │
+                                            ▼
+                                        Cross-Encoder Reranking
+                                            │
+                                            ▼
+                                        Context Compression
+                                            │
+                                            ▼
+                                        Retrieval Diagnostics
+                                            │
+                                            ▼
+                                        Answerability Estimation
+                                            │
+                                            ▼
+                                        Confidence Routing
+                                            │
+                                            ▼
+                                        Grounded Generation
+                                            │
+                                            ▼
+                                        Semantic Validation
+                                            │
+                                            ▼
+                                        Final Response
 
 
-┌─────────────────────────────────────────────┐
-│                Observability                │
-├─────────────────────────────────────────────┤
-│ • Query Latency Tracking                    │
-│ • Retrieval Latency Tracking                │
-│ • Reranking Metrics                         │
-│ • Cache Hit/Miss Monitoring                 │
-│ • Retrieval Diagnostics                     │
-│ • Confidence Routing Analytics              │
-│ • Query Logging & Evaluation                │
-└─────────────────────────────────────────────┘
-```
+                            ┌─────────────────────────────────────────────┐
+                            │                Observability                │
+                            ├─────────────────────────────────────────────┤
+                            │ • Query Latency Tracking                    │
+                            │ • Retrieval Latency Tracking                │
+                            │ • Reranking Metrics                         │
+                            │ • Cache Hit/Miss Monitoring                 │
+                            │ • Retrieval Diagnostics                     │
+                            │ • Confidence Routing Analytics              │
+                            │ • Query Logging & Evaluation                │
+                            └─────────────────────────────────────────────┘
+    ```
 
 # 📚 Knowledge Base Ingestion Pipeline
 
