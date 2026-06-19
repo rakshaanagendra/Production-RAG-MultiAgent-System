@@ -183,7 +183,10 @@ The long-term goal is to evolve this project into a **production-grade Agentic A
                             │ • Confidence Routing Analytics              │
                             │ • Query Logging & Evaluation                │
                             └─────────────────────────────────────────────┘
-    ```
+```
+
+---
+
 
 # 📚 Knowledge Base Ingestion Pipeline
 
