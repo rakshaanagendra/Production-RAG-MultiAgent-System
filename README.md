@@ -1,179 +1,410 @@
-# LLM-Powered RAG Assistant
+# 🚀 LLM-Powered RAG Assistant
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
-![Docker](https://img.shields.io/badge/Docker-supported-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![FAISS](https://img.shields.io/badge/FAISS-Vector%20Search-green)
+![RAG](https://img.shields.io/badge/RAG-Retrieval%20Engineering-orange)
+![LLM](https://img.shields.io/badge/LLM-Systems-red)
+![Status](https://img.shields.io/badge/Status-Active%20Development-success)
 
-# Quick Start
+## 🎯 Overview
 
-## Clone Repository
+A production-oriented Retrieval-Augmented Generation (RAG) system built to explore modern **Retrieval Engineering**, **LLM Systems Engineering**, **Evaluation Frameworks**, **Observability**, and **Hallucination Mitigation** techniques used in real-world AI applications.
 
-```bash
-git clone https://github.com/rakshaanagendra/llm-rag-assistant.git
-cd llm-rag-assistant
+Unlike traditional RAG demos that stop at:
+
+```text
+PDF → Embeddings → Vector Search → LLM
 ```
 
-## Create Virtual Environment
+this project focuses on solving practical engineering challenges such as:
 
-```bash
-python -m venv rag
-```
+* Retrieval quality optimization
+* Hybrid search strategies
+* Query expansion
+* Cross-encoder reranking
+* Retrieval observability
+* Confidence estimation
+* Adaptive retrieval
+* Evaluation pipelines
+* Caching systems
+* Hallucination mitigation
 
-## Activate Virtual Environment
-
-### Windows
-```bash
-.\rag\Scripts\activate
-```
-
-### Linux / Mac
-```bash
-source rag/bin/activate
-```
-
-## Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-## Run the Application
-
-```bash
-python main.py
-```
+The long-term goal is to evolve this project into a **production-grade Agentic AI system** using LangGraph, planning workflows, tool use, and multi-agent orchestration.
 
 ---
 
-# Example Workflow
+# ✨ Key Engineering Achievements
 
-## Example Query
+### Retrieval Engineering
+
+✅ Hybrid Retrieval (Dense + Sparse)
+
+✅ BM25 Sparse Retrieval
+
+✅ Dense Vector Retrieval using Sentence Transformers
+
+✅ Reciprocal Rank Fusion (RRF)
+
+✅ Multi-Query Retrieval
+
+✅ LLM-Driven Query Expansion
+
+✅ Dynamic Retrieval Parameters
+
+✅ Adaptive Retrieval Strategies
+
+---
+
+### Ranking & Relevance
+
+✅ Cross-Encoder Reranking (`BAAI/bge-reranker-base`)
+
+✅ Candidate Quality Analysis
+
+✅ Rerank Lift Diagnostics
+
+✅ Retrieval Failure Analysis
+
+---
+
+### Evaluation & Reliability
+
+✅ Retrieval Health Scoring
+
+✅ Answerability Estimation
+
+✅ Confidence Scoring
+
+✅ Semantic Validation
+
+✅ Safe Abstention Handling
+
+---
+
+### Observability & Diagnostics
+
+✅ Retrieval Latency Monitoring
+
+✅ End-to-End Latency Tracking
+
+✅ Duplicate Detection
+
+✅ Source Diversity Analysis
+
+✅ Rerank Analysis
+
+✅ Retry Effectiveness Analysis
+
+✅ Retrieval Diagnostics Framework
+
+---
+
+### Performance Optimization
+
+✅ Query Cache
+
+✅ Retrieval Cache
+
+✅ Dynamic Context Construction
+
+✅ Confidence-Based Routing
+
+✅ Adaptive Retry Policies
+
+---
+
+# 🏗️ System Architecture
 
 ```text
-What is the difference between dense and sparse retrieval?
-```
-
-## Example Pipeline Flow
-
-```text
-Query
-  ↓
+User Query
+    │
+    ▼
+Intent Analysis
+    │
+    ▼
 Multi-Query Expansion
-  ↓
-Dense + Sparse Retrieval
-  ↓
-Hybrid Retrieval (RRF)
-  ↓
+    │
+    ▼
+Dense Retrieval + BM25 Sparse Retrieval
+    │
+    ▼
+Reciprocal Rank Fusion (RRF)
+    │
+    ▼
 Cross-Encoder Reranking
-  ↓
-Grounded Context Construction
-  ↓
-LLM Response Generation
-  ↓
-Semantic Validation + Confidence Scoring
-```
-
-## Example Output
-
-```text
-Dense retrieval uses semantic embeddings to retrieve contextually similar documents, while sparse retrieval relies on keyword matching techniques such as BM25. Hybrid retrieval combines both approaches to improve retrieval robustness and grounding quality.
+    │
+    ▼
+Retrieval Diagnostics
+    │
+    ▼
+Answerability Estimation
+    │
+    ▼
+Confidence Routing
+    │
+    ▼
+Grounded Generation
+    │
+    ▼
+Semantic Validation
+    │
+    ▼
+Final Response
 ```
 
 ---
 
-# Repository Structure
+# 🔍 Current Capabilities
+
+## Retrieval Layer
+
+* Dense Retrieval
+* BM25 Sparse Retrieval
+* Hybrid Search
+* Reciprocal Rank Fusion (RRF)
+* Multi-Query Expansion
+* Adaptive Retrieval
+* Dynamic Retrieval Configuration
+
+## Ranking Layer
+
+* CrossEncoder Reranking
+* Candidate Quality Evaluation
+* Retrieval Relevance Analysis
+
+## Evaluation Layer
+
+* Retrieval Health Scoring
+* Answerability Estimation
+* Confidence Estimation
+* Semantic Validation
+
+## Observability Layer
+
+* Retrieval Diagnostics
+* Source Diversity Monitoring
+* Duplicate Analysis
+* Rerank Diagnostics
+* Latency Monitoring
+* Retry Analysis
+
+## Optimization Layer
+
+* Query Cache
+* Retrieval Cache
+* Confidence Routing
+* Dynamic Context Selection
+* Context compression and prompt ready context
+* Retry Policies
+
+---
+
+# 📊 Engineering Metrics Tracked
+
+The system continuously measures and analyzes:
+
+| Metric                   | Purpose                           |
+| ------------------------ | --------------------------------- |
+| Retrieval Latency        | Retrieval performance             |
+| Rerank Latency           | Ranking performance               |
+| Total Pipeline Latency   | End-to-end performance            |
+| Duplicate Retrieval Rate | Retrieval efficiency              |
+| Source Diversity         | Retrieval robustness              |
+| Rerank Lift              | Reranker effectiveness            |
+| Cache Hit Rate           | Optimization effectiveness        |
+| Retry Success Rate       | Adaptive retrieval effectiveness  |
+| Retrieval Health Score   | Retrieval quality                 |
+| Answerability Score      | Likelihood of answering correctly |
+
+---
+
+# 🧪 Evaluation Framework
+
+The system is evaluated using a benchmark suite containing:
+
+* Fact Lookup Queries
+* Definition Queries
+* Comparison Queries
+* How-To Queries
+* Multi-Hop Reasoning Queries
+* Exploratory Queries
+* Timeline Queries
+* Verification Queries
+* Out-of-Domain Queries
+
+Current benchmark size:
+
+**60+ evaluation queries**
+
+designed to stress-test retrieval quality and answer grounding.
+
+---
+
+# 🛠️ Technology Stack
+
+## LLM & NLP
+
+* Ollama 
+* Qwen 2.5:3B
+* Hugging Face Transformers
+* Sentence Transformers
+* CrossEncoder Models
+
+## Retrieval
+
+* Embedding - BAAI/bge-small-en-v1.5
+* FAISS vector store
+* BM25
+* Hybrid Search
+* Reciprocal Rank Fusion (RRF)
+
+## Ranking
+
+* CrossEncoder Reranking - BAAI/bge-reranker-base
+
+## Document parsing
+
+* PyMuPDF (fitz)
+* PyPDF2 (PdfReader)
+
+## Data Processing
+
+* NumPy
+* Pandas
+* LangChain
+
+## Engineering
+
+* Python
+* Git
+* JSON-Based Caching
+
+---
+
+# 📁 Project Structure
 
 ```text
 Production-RAG-AI-Assistant-with-Reranking-and-Evaluation-Pipeline/
-├── app/
+
 ├── data/
-│   ├── pdfs/
+│   ├── raw/
 │   ├── processed/
-│   ├── queries/
-│   │   └── eval_queries.json
-│   └── raw/
-├── evaluation/
-│   └── evaluator.py
+│   └── queries/
+│
 ├── rag-pipeline/
-│   ├── evaluation/
-│   │   ├── llm_validator.py
-│   │   ├── semantic_validator.py
-│   │   └── validator.py
+│
+│   ├── ingestion/
+│   │   ├── loader.py
+│   │   ├── chunker.py
+│   │   └── embedder.py
+│
+│   ├── retrieval/
+│   │   ├── retriever.py
+│   │   ├── sparse_retriever.py
+│   │   ├── multi_query_retriever.py
+│   │   ├── multi_query_hybrid.py
+│   │   ├── query_rewriter.py
+│   │   └── reranker.py
+│
 │   ├── generation/
 │   │   └── generator.py
-│   ├── ingestion/
-│   │   ├── chunker.py
-│   │   ├── embedder.py
-│   │   └── loader.py
-│   ├── pipeline/
-│   │   └── pipeline.py
-│   └── retrieval/
-│       ├── multi_query_hybrid.py
-│       ├── multi_query_retriever.py
-│       ├── query_rewriter.py
-│       ├── reranker.py
-│       ├── retriever.py
-│       └── sparse_retriever.py
-├── scripts/
-│   └── ingest.py
-├── tests/
-├── vectorstore/
-│   └── faiss_indexer.py
-├── main.py
-├── pyrightconfig.json
-├── requirements.txt
+│   
+│   ├── caching/
+│   │   ├── cache_manager.py
+│   │   ├── query_cache.json
+|   |   ├── retrieval_cache.py
+│   │   ├── retrieval_cache.json
+│   
+│   ├── observability/ tests/
+│   │   ├── test_analytics.py
+│   │   ├── metrics_logger..py
+│   │   ├── metrics_aggregator.py
+│   │   ├── query_metrics.jsonl
+|
+├── outputs/
+├── scripts/ ingest.py
+├── vectorstore/ faiss_indexer.py
 ├── .gitignore
+├── requirements.txt
 └── README.md
 ```
 
 ---
 
-# Project Status
+# 💡 Why This Project Stands Out
 
-## Completed
-- Dense vector retrieval
-- BM25 sparse retrieval
-- Hybrid retrieval with Reciprocal Rank Fusion (RRF)
-- Multi-query retrieval expansion
-- Cross-Encoder reranking
-- Grounded response generation
-- Citation-aware response workflows
-- Semantic validation
-- LLM-as-a-judge evaluation
-- Confidence scoring
-- Safe abstention handling
+Most RAG projects demonstrate only retrieval and generation.
 
-## In Progress
-- Retrieval diagnostics
-- Metadata-aware retrieval
-- Dynamic top-k retrieval
-- Context compression
-- Query routing/classification
+This project explores the engineering aspects required to build reliable AI systems:
 
-## Planned
-- UI-based AI assistant
-- End-to-end deployment pipeline
-- Observability and tracing
-- Caching and latency optimization
-- Advanced evaluation dashboards
-- Scalable cloud deployment
-- Agentic retrieval workflows
+* Retrieval Engineering
+* Hybrid Search
+* Query Expansion
+* Reranking
+* Confidence Estimation
+* Hallucination Mitigation
+* Evaluation Frameworks
+* Retrieval Observability
+* Adaptive Retrieval
+* Caching
+* Production-Oriented Diagnostics
+
+The focus is on understanding **why retrieval systems succeed or fail**, and building mechanisms to diagnose, measure, and improve them.
 
 ---
 
-# Why This Project?
 
-Most beginner RAG systems stop at:
-- vector search
-- prompt injection
-- response generation
+---
 
-This project focuses on the engineering challenges behind reliable LLM systems:
-- retrieval quality
-- reranking effectiveness
-- grounded generation
-- hallucination mitigation
-- evaluation workflows
-- modular AI system design
+# 🔮 Future Roadmap
 
-The goal is to understand and implement production-oriented RAG architectures rather than building a basic chatbot wrapper.
+## Retrieval Engineering
+
+* Metadata-Aware Retrieval
+* Advanced Retrieval Diagnostics
+
+## Agentic AI
+
+* Query Routing
+* Retrieval Critics
+* Planning-Based Retrieval
+* Agent Memory
+* Tool-Using Agents
+* LangGraph Workflows
+
+## Multi-Agent Systems
+
+* Research Agent
+* Retrieval Agent
+* Critic Agent
+* Writer Agent
+* Multi-Agent Collaboration
+
+## Production AI Systems
+
+* FastAPI Backend
+* Interactive Frontend
+* MLflow Integration
+* Tracing & Monitoring
+* Cloud Deployment
+* Scalable Inference Infrastructure
+
+---
+
+# 👨‍💻 Author
+
+**Raksha Nagendra**
+
+Master's Student in Information Technology
+University of Stuttgart
+
+### Interests
+
+* LLM Engineering
+* Agentic AI
+* Retrieval Engineering
+* MLOps
+* Production AI Systems
+* Applied AI
+
+This project serves as an evolving AI Engineering platform for exploring Retrieval-Augmented Generation, evaluation systems, observability, and future Agentic AI workflows.

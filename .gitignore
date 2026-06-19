@@ -16,6 +16,7 @@ rag-pipeline/Scripts/
 rag-pipeline/Include/
 rag-pipeline/share/
 rag-pipeline/etc/
+rag-pipeline/evaluation/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -75,6 +76,8 @@ build/
 .streamlit/secrets.toml
 
 scripts/crawl_docs.py
+
+evaluation/
 
 #Note: `rag/` and `rag-pipeline/Lib`, `rag-pipeline/Scripts`, and related 
 #venv files are local environment artifacts and should not be pushed.
