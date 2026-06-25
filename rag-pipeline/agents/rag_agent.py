@@ -1,0 +1,119 @@
+from typing import Annotated
+from typing_extensions import TypedDict
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_ollama import ChatOllama
+import sys
+from pathlib import Path
+
+
+# -----------------------------------------------------------------------
+# Path setup — same pattern as rag_tool.py
+# -----------------------------------------------------------------------
+PIPELINE_ROOT = Path(__file__).resolve().parents[1]
+if str(PIPELINE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PIPELINE_ROOT))
+
+from agents.rag_tool import rag_search
+from agents.tavily_tool import web_search
+
+# -----------------------------------------------------------------------
+# State
+# Why: LangGraph needs a state object to pass between nodes
+# add_messages is a special reducer — it appends new messages
+# to the list rather than overwriting it
+# -----------------------------------------------------------------------
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+
+# -----------------------------------------------------------------------
+# LLM setup
+# Why: we bind the tool to the LLM so it knows the tool exists
+# and can choose to call it
+# -----------------------------------------------------------------------
+tools = [rag_search, web_search]
+
+llm = ChatOllama(model="qwen2.5:7b")
+llm_with_tools = llm.bind_tools(tools)
+
+# -----------------------------------------------------------------------
+# Nodes
+# -----------------------------------------------------------------------
+from langchain_core.messages import SystemMessage
+
+SYSTEM_PROMPT = """You are a research assistant with access to two tools:
+
+1. rag_search — use this for questions about AI, LLMs, RAG pipelines,
+   retrieval systems, agents, multi-agent systems, LLM engineering,
+   fine-tuning, and related research topics from academic papers.
+
+2. web_search — use this for general knowledge questions about people,
+   places, history, science, geography, and anything NOT related to
+   AI research.
+
+RULES:
+1. Always pass the user's COMPLETE original question to the tool. Never shorten it.
+2. Pick the right tool based on the query topic.
+3. After getting the tool result, check the 'action' field in rag_search results:
+   - 'generate' → answer confidently
+   - 'generate_cautiously' → answer but mention uncertainty
+   - 'retry_or_abstain' → tell the user you cannot find relevant information
+4. Always cite sources in your answer.
+"""
+
+def llm_node(state: AgentState) -> AgentState:
+    """LLM reasons and decides whether to call a tool or answer directly."""
+    messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
+    response = llm_with_tools.invoke(messages)
+    return {"messages": [response]}
+# ToolNode handles tool execution automatically
+# It reads the tool call from the last LLM message,
+# executes the right tool, and returns the result as a message
+tool_node = ToolNode(tools)
+
+# -----------------------------------------------------------------------
+# Graph construction
+# -----------------------------------------------------------------------
+graph_builder = StateGraph(AgentState)
+
+graph_builder.add_node("llm_node", llm_node)
+graph_builder.add_node("tools", tool_node)
+
+graph_builder.add_edge(START, "llm_node")
+
+# tools_condition returns "tools" or END — the node must be named "tools"
+graph_builder.add_conditional_edges(
+    "llm_node",
+    tools_condition,
+)
+
+graph_builder.add_edge("tools", "llm_node")
+
+graph = graph_builder.compile()
+
+# -----------------------------------------------------------------------
+# Test
+# -----------------------------------------------------------------------
+if __name__ == "__main__":
+
+    print("=== TEST 1: AI TOPIC → should use rag_search ===")
+    result = graph.invoke(
+        {"messages": [{"role": "user", "content": "What is ReAct prompting framework for LLM agents?"}]},
+        config={"recursion_limit": 10}
+    )
+    print(result["messages"][-1].content)
+
+    print("\n=== TEST 2: GENERAL KNOWLEDGE → should use web_search ===")
+    result2 = graph.invoke(
+        {"messages": [{"role": "user", "content": "What is the capital of France?"}]},
+        config={"recursion_limit": 10}
+    )
+    print(result2["messages"][-1].content)
+
+    print("\n=== TEST 3: EDGE CASE → who invented transformers? ===")
+    result3 = graph.invoke(
+        {"messages": [{"role": "user", "content": "Who invented the transformer architecture?"}]},
+        config={"recursion_limit": 10}
+    )
+    print(result3["messages"][-1].content)

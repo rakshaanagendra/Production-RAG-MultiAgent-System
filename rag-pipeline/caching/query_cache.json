@@ -1,29 +1,35 @@
 {
-  "what is react and how does it work?": [
-    "What is ReAct and how does it work?"
+  "what is react?": [
+    "What is ReAct?",
+    "ReAct method definition",
+    "ReAct approach details",
+    "ReAct procedure explanation"
   ],
-  "what problem does toolformer solve?": [
-    "What problem does Toolformer solve?",
-    "toolformer problems addressed",
-    "toolformer solves what issues",
-    "use cases of toolformer"
+  "what is the capital of france?": [
+    "What is the capital of France?"
   ],
-  "what is reflexion?": [
-    "What is Reflexion?"
+  "react": [
+    "ReAct",
+    "reactive learning",
+    "reactive artificial intelligence",
+    "act-reaction model"
   ],
-  "what is self-challenging?": [
-    "What is Self-challenging?"
+  "what is react": [
+    "What is ReAct",
+    "ReAct method",
+    "ReAct algorithm details",
+    "ReAct implementation overview"
   ],
-  "what is lora?": [
-    "What is LoRA?"
+  "who invented the transformer architecture?": [
+    "Who invented the transformer architecture?",
+    "transformer architecture inventor",
+    "history of transformer architecture",
+    "who created the transformer model"
   ],
-  "what is qlora?": [
-    "What is QLoRA?"
-  ],
-  "what is flashattention?": [
-    "What is FlashAttention?"
-  ],
-  "what is dense and sparse retrieval?": [
-    "What is dense and sparse retrieval?"
+  "what is react prompting framework for llm agents?": [
+    "What is ReAct prompting framework for LLM agents?",
+    "ReAct prompting framework technical details",
+    "LLM agent interaction mechanisms ReAct",
+    "ReAct prompt engineering for LLMs"
   ]
 }
