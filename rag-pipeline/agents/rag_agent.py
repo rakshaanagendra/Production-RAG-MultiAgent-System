@@ -6,7 +6,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_ollama import ChatOllama
 import sys
 from pathlib import Path
-
+from langgraph.checkpoint.memory import MemorySaver
 
 # -----------------------------------------------------------------------
 # Path setup — same pattern as rag_tool.py
@@ -41,6 +41,7 @@ llm_with_tools = llm.bind_tools(tools)
 # Nodes
 # -----------------------------------------------------------------------
 from langchain_core.messages import SystemMessage
+from langchain_core.runnables import RunnableConfig
 
 SYSTEM_PROMPT = """You are a research assistant with access to two tools:
 
@@ -90,30 +91,79 @@ graph_builder.add_conditional_edges(
 
 graph_builder.add_edge("tools", "llm_node")
 
-graph = graph_builder.compile()
+checkpointer = MemorySaver()
+
+graph = graph_builder.compile(checkpointer=checkpointer)
 
 # -----------------------------------------------------------------------
 # Test
 # -----------------------------------------------------------------------
 if __name__ == "__main__":
 
-    print("=== TEST 1: AI TOPIC → should use rag_search ===")
-    result = graph.invoke(
-        {"messages": [{"role": "user", "content": "What is ReAct prompting framework for LLM agents?"}]},
-        config={"recursion_limit": 10}
-    )
-    print(result["messages"][-1].content)
+    # print("=== TEST 1: AI TOPIC → should use rag_search ===")
+    # result = graph.invoke(
+    #     {"messages": [{"role": "user", "content": "What is ReAct prompting framework for LLM agents?"}]},
+    #     config={"recursion_limit": 10}
+    # )
+    # print(result["messages"][-1].content)
 
-    print("\n=== TEST 2: GENERAL KNOWLEDGE → should use web_search ===")
-    result2 = graph.invoke(
-        {"messages": [{"role": "user", "content": "What is the capital of France?"}]},
-        config={"recursion_limit": 10}
-    )
-    print(result2["messages"][-1].content)
+    # print("\n=== TEST 2: GENERAL KNOWLEDGE → should use web_search ===")
+    # result2 = graph.invoke(
+    #     {"messages": [{"role": "user", "content": "What is the capital of France?"}]},
+    #     config={"recursion_limit": 10}
+    # )
+    # print(result2["messages"][-1].content)
 
-    print("\n=== TEST 3: EDGE CASE → who invented transformers? ===")
-    result3 = graph.invoke(
-        {"messages": [{"role": "user", "content": "Who invented the transformer architecture?"}]},
-        config={"recursion_limit": 10}
+    # print("\n=== TEST 3: EDGE CASE → who invented transformers? ===")
+    # result3 = graph.invoke(
+    #     {"messages": [{"role": "user", "content": "Who invented the transformer architecture?"}]},
+    #     config={"recursion_limit": 10}
+    # )
+    # print(result3["messages"][-1].content)
+
+    # ------------------------------------------------------------------
+    # TEST 1: Multi-turn memory — same thread_id across 3 turns
+    # Expected: turn 2 and 3 correctly resolve "it" and "that comparison"
+    # because the agent sees the full message history from this thread
+    # ------------------------------------------------------------------
+    print("=== TEST 1: MULTI-TURN MEMORY (same thread) ===")
+
+    thread_a: RunnableConfig = {
+        "configurable": {"thread_id": "session_memory_test"},
+        "recursion_limit": 10
+    }
+
+    turn1 = graph.invoke(
+        {"messages": [{"role": "user", "content": "What is the ReAct prompting framework for LLM agents?"}]},
+        config=thread_a
     )
-    print(result3["messages"][-1].content)
+    print("Turn 1:", turn1["messages"][-1].content)
+
+    turn2 = graph.invoke(
+        {"messages": [{"role": "user", "content": "Can you give me a concrete example of it?"}]},
+        config=thread_a  # same thread_id — agent sees full history, knows "it" = ReAct
+    )
+    print("\nTurn 2 (refers to 'it' from turn 1):", turn2["messages"][-1].content)
+
+    turn3 = graph.invoke(
+        {"messages": [{"role": "user", "content": "How does that compare to chain-of-thought prompting?"}]},
+        config=thread_a  # agent still has full history from turns 1 and 2
+    )
+    print("\nTurn 3 (compares to prior context):", turn3["messages"][-1].content)
+
+    # ------------------------------------------------------------------
+    # TEST 2: Memory isolation — different thread_id starts completely fresh
+    # Expected: agent has NO knowledge of the ReAct conversation above
+    # ------------------------------------------------------------------
+    print("\n=== TEST 2: MEMORY ISOLATION (different thread) ===")
+
+    thread_b: RunnableConfig = {
+        "configurable": {"thread_id": "session_isolation_test"},
+        "recursion_limit": 10
+    }
+
+    isolation_test = graph.invoke(
+        {"messages": [{"role": "user", "content": "What did we just discuss?"}]},
+        config=thread_b  # fresh thread — no history at all
+    )
+    print("Fresh thread response (should NOT know about ReAct):", isolation_test["messages"][-1].content)
