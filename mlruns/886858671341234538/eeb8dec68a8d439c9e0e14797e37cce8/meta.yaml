@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/nagen/Desktop/ML%26DLProjects/LLMs/Production-RAG-AI-Assistant-with-Reranking-and-Evaluation-Pipeline/mlruns/886858671341234538/eeb8dec68a8d439c9e0e14797e37cce8/artifacts
+end_time: 1782578523666
+entry_point_name: ''
+experiment_id: '886858671341234538'
+lifecycle_stage: active
+run_id: eeb8dec68a8d439c9e0e14797e37cce8
+run_name: righteous-panda-379
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1782578523569
+status: 3
+tags: []
+user_id: nagen

@@ -1,8 +1,9 @@
 import json
 import re
 import sys
+import time
 from pathlib import Path
-from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 
 # -----------------------------------------------------------------------
@@ -15,10 +16,9 @@ if str(PIPELINE_ROOT) not in sys.path:
 from agents.state import MultiAgentState
 
 # -----------------------------------------------------------------------
-# LLM — llama3.1:8b for better instruction following
-# No tools bound — pure evaluation task
+# LLM — llama-3.3-70b-versatile for strict grounding evaluation
 # -----------------------------------------------------------------------
-llm = ChatOllama(model="llama3.1:8b")
+llm = ChatGroq(model="llama-3.1-8b-instant")
 
 # -----------------------------------------------------------------------
 # System Prompt
@@ -33,6 +33,7 @@ Rules:
 3. If ALL claims are directly supported by the context, set answer_grounded to true
 4. If ANY claim cannot be traced back to the context — even minor connecting language or assumptions — set answer_grounded to false
 5. Write a critique explaining your decision — be specific about which claims are grounded or not
+6. Do NOT infer or assume. If the exact claim is not present verbatim or near-verbatim in the context, mark it as ungrounded.
 
 Respond ONLY with this exact JSON format, no other text, no markdown:
 {"answer_grounded": true or false, "critique": "your explanation here"}"""
@@ -45,25 +46,25 @@ def critic_node(state: MultiAgentState) -> dict:
     Validates whether final_answer is grounded in research_context.
     Hard gate on empty final_answer.
     LLM call compares answer against context for grounding.
+    Records its own latency into node_latencies.
     """
+    # ADDED: start timer before any work begins
+    node_start = time.time()
+
     query = state["query"]
     final_answer = state.get("final_answer", "")
     research_context = state.get("research_context", "")
 
-    # -----------------------------------------------------------------------
     # Hard gate — nothing to critique if writer produced no answer
-    # -----------------------------------------------------------------------
     if not final_answer:
-        log_entry = "[CriticAgent] Skipped — final_answer is empty"
+        node_latency_ms = round((time.time() - node_start) * 1000, 2)
         return {
             "answer_grounded": False,
             "critique": "No answer was generated to critique.",
-            "agent_log": [log_entry]
+            "node_latencies": {"critic_node": node_latency_ms},
+            "agent_log": [f"[CriticAgent] Skipped — final_answer is empty | Latency: {node_latency_ms}ms"]
         }
 
-    # -----------------------------------------------------------------------
-    # Build human message — query + final_answer + research_context
-    # -----------------------------------------------------------------------
     human_message = f"""Query: {query}
 
 Final Answer to critique:
@@ -74,9 +75,6 @@ Research Context to compare against:
 
 Now evaluate whether the final answer is grounded in the research context."""
 
-    # -----------------------------------------------------------------------
-    # LLM call
-    # -----------------------------------------------------------------------
     messages = [
         SystemMessage(content=CRITIC_SYSTEM_PROMPT),
         HumanMessage(content=human_message)
@@ -85,33 +83,31 @@ Now evaluate whether the final answer is grounded in the research context."""
     response = llm.invoke(messages)
     raw = (response.content if isinstance(response.content, str) else str(response.content)).strip()
 
-    # Strip markdown code fences
     clean = raw.replace("```json", "").replace("```", "").strip()
-
-    # Replace literal newlines and tabs inside JSON string values
     clean = re.sub(r'[\n\r\t]', ' ', clean)
 
-    # -----------------------------------------------------------------------
-    # Parse JSON response
-    # -----------------------------------------------------------------------
     try:
         parsed = json.loads(clean)
         answer_grounded = bool(parsed.get("answer_grounded", False))
         critique = parsed.get("critique", "")
     except (json.JSONDecodeError, KeyError) as e:
-        # If model ignored JSON instructions, default to not grounded
         answer_grounded = False
         critique = f"Critic parse failed — raw output: {raw}"
+
+    # ADDED: stop timer after LLM call completes
+    node_latency_ms = round((time.time() - node_start) * 1000, 2)
 
     log_entry = (
         f"[CriticAgent] Query: '{query}' | "
         f"Grounded: {answer_grounded} | "
-        f"Critique length: {len(critique)} chars"
+        f"Critique length: {len(critique)} chars | "
+        f"Latency: {node_latency_ms}ms"
     )
 
     return {
         "answer_grounded": answer_grounded,
         "critique": critique,
+        "node_latencies": {"critic_node": node_latency_ms},
         "agent_log": [log_entry]
     }
 
@@ -139,6 +135,7 @@ if __name__ == "__main__":
         "retrieval_strategy": "dense",
         "critique": "",
         "answer_grounded": False,
+        "node_latencies": {},
         "agent_log": []
     })
 
@@ -146,4 +143,5 @@ if __name__ == "__main__":
     print("=== Critic Node Test Result ===")
     print("Answer Grounded:", result["answer_grounded"])
     print("Critique:", result["critique"])
+    print("Node Latencies:", result["node_latencies"])
     print("Agent Log:", result["agent_log"])

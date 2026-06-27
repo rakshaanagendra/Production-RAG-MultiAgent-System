@@ -1,8 +1,9 @@
 import json
 import sys
 import re
+import time
 from pathlib import Path
-from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 
 # -----------------------------------------------------------------------
@@ -15,9 +16,9 @@ if str(PIPELINE_ROOT) not in sys.path:
 from agents.state import MultiAgentState
 
 # -----------------------------------------------------------------------
-# LLM — no tools bound, plain generation only
+# LLM
 # -----------------------------------------------------------------------
-llm = ChatOllama(model="qwen2.5:7b")
+llm = ChatGroq(model="llama-3.1-8b-instant")
 
 # -----------------------------------------------------------------------
 # Prompts
@@ -54,49 +55,48 @@ def writer_node(state: MultiAgentState) -> dict:
     Generates a final answer from research context.
     Hard gates on answerable, context, and action.
     Tone determined by action field.
+    Records its own latency into node_latencies.
     """
+    # ADDED: start timer before any work begins
+    node_start = time.time()
+
     query = state["query"]
     research_context = state.get("research_context", "")
     answerable = state.get("answerable", False)
     action = state.get("action", "retry_or_abstain")
     sources = state.get("sources", [])
 
-    # -----------------------------------------------------------------------
-    # Hard gates — do not generate if any of these fail
-    # -----------------------------------------------------------------------
+    # Hard gates — record latency even on early exits
     if not answerable:
-        log_entry = "[WriterAgent] Skipped — answerable: False"
+        node_latency_ms = round((time.time() - node_start) * 1000, 2)
         return {
             "final_answer": "I cannot answer this query — the retrieved context was not relevant.",
-            "agent_log": [log_entry]
+            "node_latencies": {"writer_node": node_latency_ms},
+            "agent_log": [f"[WriterAgent] Skipped — answerable: False | Latency: {node_latency_ms}ms"]
         }
 
     if not research_context:
-        log_entry = "[WriterAgent] Skipped — research_context is empty"
+        node_latency_ms = round((time.time() - node_start) * 1000, 2)
         return {
             "final_answer": "I cannot answer this query — no context was retrieved.",
-            "agent_log": [log_entry]
+            "node_latencies": {"writer_node": node_latency_ms},
+            "agent_log": [f"[WriterAgent] Skipped — research_context is empty | Latency: {node_latency_ms}ms"]
         }
 
     if action == "retry_or_abstain":
-        log_entry = "[WriterAgent] Skipped — action is retry_or_abstain"
+        node_latency_ms = round((time.time() - node_start) * 1000, 2)
         return {
             "final_answer": "I cannot answer this query — retrieval confidence was too low.",
-            "agent_log": [log_entry]
+            "node_latencies": {"writer_node": node_latency_ms},
+            "agent_log": [f"[WriterAgent] Skipped — action is retry_or_abstain | Latency: {node_latency_ms}ms"]
         }
 
-    # -----------------------------------------------------------------------
-    # Select prompt based on action
-    # -----------------------------------------------------------------------
     system_prompt = (
         CAUTIOUS_WRITER_SYSTEM_PROMPT
         if action == "generate_cautiously"
         else WRITER_SYSTEM_PROMPT
     )
 
-    # -----------------------------------------------------------------------
-    # Build the human message — full context with metadata for traceability
-    # -----------------------------------------------------------------------
     human_message = f"""Query: {query}
 
 Research Context:
@@ -106,9 +106,6 @@ Sources available: {sources}
 
 Write your answer now."""
 
-    # -----------------------------------------------------------------------
-    # LLM call
-    # -----------------------------------------------------------------------
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_message)
@@ -118,36 +115,31 @@ Write your answer now."""
     content = response.content
     raw = (content if isinstance(content, str) else str(content)).strip()
 
-    # Strip markdown code fences if model wraps JSON in them
     clean = raw.replace("```json", "").replace("```", "").strip()
-
-    # Replace literal newlines and tabs inside JSON string values only
-    # by normalizing the entire thing through a regex
     clean = re.sub(r'[\n\r\t]', ' ', clean)
 
-    # -----------------------------------------------------------------------
-    # Parse JSON response
-    # -----------------------------------------------------------------------
     try:
         parsed = json.loads(clean)
         final_answer = parsed.get("final_answer", "")
     except (json.JSONDecodeError, KeyError) as e:
-        # If model ignored JSON instructions, use raw output as fallback
         print(f"JSON PARSE FAILED: {e}")
         print(f"RAW OUTPUT: {repr(raw)}")
         final_answer = raw
 
-
+    # ADDED: stop timer after LLM call completes
+    node_latency_ms = round((time.time() - node_start) * 1000, 2)
 
     log_entry = (
         f"[WriterAgent] Query: '{query}' | "
         f"Action: {action} | "
         f"Answer length: {len(final_answer)} chars | "
-        f"Sources used: {len(sources)}"
+        f"Sources used: {len(sources)} | "
+        f"Latency: {node_latency_ms}ms"
     )
 
     return {
         "final_answer": final_answer,
+        "node_latencies": {"writer_node": node_latency_ms},
         "agent_log": [log_entry]
     }
 
@@ -167,10 +159,12 @@ if __name__ == "__main__":
         "critique": "",
         "final_answer": "",
         "answer_grounded": False,
+        "node_latencies": {},
         "agent_log": []
     }
 
     result = writer_node(test_state)
     print("=== Writer Node Test Result ===")
     print("Final Answer:", result["final_answer"])
+    print("Node Latencies:", result["node_latencies"])
     print("Agent Log:", result["agent_log"])

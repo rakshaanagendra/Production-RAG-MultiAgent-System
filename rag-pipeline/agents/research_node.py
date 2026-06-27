@@ -1,10 +1,14 @@
 import json
 import sys
 import uuid
+import time
 from typing import cast
 from pathlib import Path
+from dotenv import load_dotenv
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
+
+load_dotenv()
 
 # -----------------------------------------------------------------------
 # Path setup
@@ -51,6 +55,10 @@ def research_node(state: MultiAgentState) -> dict:
     Invokes the agent, extracts structured tool output,
     maps fields to MultiAgentState, and logs the decision.
     """
+
+    # Added - start timer for latency measurement
+    node_start = time.time()
+    
     query = state["query"]
 
     # Run the existing ReAct agent
@@ -75,6 +83,9 @@ def research_node(state: MultiAgentState) -> dict:
     # Extract structured output from ToolMessage
     tool_output = extract_tool_output(messages)
 
+     # ADDED: stop timer before building return dict
+    node_latency_ms = round((time.time() - node_start) * 1000, 2)
+
     # If no structured tool output found (e.g. web_search was used),
     # fall back to the final LLM message as raw context
     if not tool_output:
@@ -86,10 +97,13 @@ def research_node(state: MultiAgentState) -> dict:
             "action": "generate_cautiously",
             "answerable": True,
             "retrieval_strategy": "web_search_fallback",
+            "node_latencies": {"research_node": node_latency_ms},
             "agent_log": [
                 f"[ResearchAgent] Query: '{query}' | "
                 f"No structured RAG output found — web_search fallback used"
-            ]
+                f"Latency: {node_latency_ms} ms"
+            ],
+            
         }
 
     # Map rag_tool.py fields to MultiAgentState fields
@@ -107,6 +121,7 @@ def research_node(state: MultiAgentState) -> dict:
         f"Answerable: {answerable} | "
         f"Strategy: {retrieval_strategy} | "
         f"Sources: {len(sources)}"
+        f"Latency: {node_latency_ms} ms"
     )
 
     return {
@@ -116,6 +131,7 @@ def research_node(state: MultiAgentState) -> dict:
         "action": action,
         "answerable": answerable,
         "retrieval_strategy": retrieval_strategy,
+        "node_latencies": {"research_node": node_latency_ms},
         "agent_log": [log_entry]
     }
 
@@ -133,4 +149,5 @@ if __name__ == "__main__":
     print(f"Action: {result['action']}")
     print(f"Answerable: {result['answerable']}")
     print(f"Retrieval Strategy: {result['retrieval_strategy']}")
+    print(f"Node Latencies: {result['node_latencies']}")
     print(f"Agent Log: {result['agent_log']}")

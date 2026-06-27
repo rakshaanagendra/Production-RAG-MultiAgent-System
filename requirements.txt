@@ -16,6 +16,7 @@ langchain-core
 langchain-text-splitters
 langchain-ollama
 langchain-tavily
+langchain-groq
 
 # Datasets 
 datasets

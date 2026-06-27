@@ -43,5 +43,41 @@
     "ReAct prompting framework technical details",
     "LLM agent interaction with ReAct prompting",
     "ReAct prompting mechanism in LLM agents"
+  ],
+  "what is langgraph?": [
+    "What is LangGraph?",
+    "langgraph architecture",
+    "LangGraph model details",
+    "LangGraph neural network"
+  ],
+  "what is langchain?": [
+    "What is LangChain?",
+    "langchain overview",
+    "langchain architecture components",
+    "langchain technical specifications"
+  ],
+  "what is faiss index?": [
+    "What is faiss index?",
+    "faiss indexing methods",
+    "faiss vector database",
+    "faiss index structure"
+  ],
+  "what are multi agent systems?": [
+    "What are multi agent systems?",
+    "multi-agent-systems-architecture",
+    "multi-agent-systems-algorithms",
+    "multi-agent-systems-research-papers"
+  ],
+  "what is rag?": [
+    "What is RAG?",
+    "RAG technical definition",
+    "RAG in natural language processing",
+    "RAG architecture components"
+  ],
+  "what are multi agent systems": [
+    "what are multi agent systems",
+    "multi-agent-systems-techniques",
+    "multiagent-systems-algorithms",
+    "multiagent-systems-research"
   ]
 }

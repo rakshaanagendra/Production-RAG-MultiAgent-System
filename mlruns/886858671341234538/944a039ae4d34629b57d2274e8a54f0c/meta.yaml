@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/nagen/Desktop/ML%26DLProjects/LLMs/Production-RAG-AI-Assistant-with-Reranking-and-Evaluation-Pipeline/mlruns/886858671341234538/944a039ae4d34629b57d2274e8a54f0c/artifacts
+end_time: 1782578631974
+entry_point_name: ''
+experiment_id: '886858671341234538'
+lifecycle_stage: active
+run_id: 944a039ae4d34629b57d2274e8a54f0c
+run_name: rogue-toad-522
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1782578631906
+status: 3
+tags: []
+user_id: nagen
