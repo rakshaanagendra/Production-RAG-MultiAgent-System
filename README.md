@@ -72,6 +72,16 @@ Built in phases, this system progressively adds the engineering layers that make
 
 ---
 
+## Screenshots
+
+### FastAPI Swagger UI
+![FastAPI Swagger](assets/fastapi_swagger.png)
+
+### MLflow Gen AI Traces
+![MLflow Traces](assets/mlflow_traces.png)
+
+---
+
 ## Engineering Phases
 
 ### Phase 1–2 — Retrieval Engineering

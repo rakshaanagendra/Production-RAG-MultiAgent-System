@@ -115,22 +115,22 @@ def query(request: QueryRequest):
     # MLflow GenAI trace
     # ------------------------------------------------------------------
     try:
-        with mlflow.start_span(name="rag-query", span_type="CHAIN") as span:
-            span.set_inputs({"question": request.question})
-            span.set_outputs({
-                "answer": result.get("final_answer", ""),
-                "grounded": result.get("answer_grounded", False),
-                "confidence": result.get("confidence", "unknown"),
-            })
-            span.set_attribute("retrieval_strategy", result.get("retrieval_strategy", "unknown"))
-            span.set_attribute("action", result.get("action", "unknown"))
-            span.set_attribute("total_latency_ms", total_latency_ms)
-            span.set_attribute("sources_count", len(result.get("sources", [])))
-            span.set_attribute("answer_length_chars", len(result.get("final_answer", "")))
+        print("DEBUG: starting MLflow logging", flush=True)
+        with mlflow.start_run():
+            print("DEBUG: inside mlflow run", flush=True)
+            mlflow.log_param("question", request.question[:250])
+            mlflow.log_param("retrieval_strategy", result.get("retrieval_strategy", "unknown"))
+            mlflow.log_param("action", result.get("action", "unknown"))
+            mlflow.log_param("confidence", result.get("confidence", "unknown"))
+            mlflow.log_metric("total_latency_ms", total_latency_ms)
+            mlflow.log_metric("answer_grounded", int(result.get("answer_grounded", False)))
+            mlflow.log_metric("sources_count", len(result.get("sources", [])))
+            mlflow.log_metric("answer_length_chars", len(result.get("final_answer", "")))
             for node_name, latency in node_latencies.items():
-                span.set_attribute(f"latency_{node_name}_ms", latency)
+                mlflow.log_metric(f"latency_{node_name}_ms", latency)
+            print("DEBUG: MLflow logging complete", flush=True)
     except Exception as e:
-        print(f"MLflow tracing failed: {e}", flush=True)
+        print(f"DEBUG: MLflow logging failed: {e}", flush=True)
 
 
     return QueryResponse(
