@@ -43,7 +43,6 @@ checkpoints/
 
 # Vector Databases
 faiss_index/
-vectorstore/
 
 # Data Files
 data/raw/

@@ -5,6 +5,7 @@
 
 # Embeddings / CrossEncoder
 sentence-transformers
+huggingface-hub
 
 # Vector DB
 faiss-cpu
