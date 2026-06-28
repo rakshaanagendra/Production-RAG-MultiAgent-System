@@ -3,7 +3,6 @@ from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
-from langchain_ollama import ChatOllama
 from langchain_groq import ChatGroq # for deployment as Ollama does not support fre cloud servers as RAM is low
 import sys
 from pathlib import Path
@@ -36,7 +35,7 @@ class AgentState(TypedDict):
 tools = [rag_search, web_search]
 
 # llm = ChatOllama(model="qwen2.5:7b")
-llm = ChatGroq(model="llama-3.1-8b-instant")
+llm = ChatGroq(model="llama-3.3-70b-versatile")
 llm_with_tools = llm.bind_tools(tools)
 
 # -----------------------------------------------------------------------
