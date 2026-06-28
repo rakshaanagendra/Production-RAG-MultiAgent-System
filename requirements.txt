@@ -1,7 +1,7 @@
 ﻿# Core LLM
-transformers
-torch
-accelerate
+#transformers
+#torch
+#accelerate
 
 # Embeddings / CrossEncoder
 sentence-transformers
@@ -14,7 +14,7 @@ langchain
 langchain-community
 langchain-core
 langchain-text-splitters
-langchain-ollama
+#langchain-ollama
 langchain-tavily
 langchain-groq
 
@@ -49,11 +49,11 @@ tiktoken
 aiohttp
 
 # Optional dev tools
-notebook
-ipykernel
+# notebook
+# ipykernel
 
 # LLM
 ollama
 
-tf-keras
+#tf-keras
 rank_bm25
