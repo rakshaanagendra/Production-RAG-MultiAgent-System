@@ -79,5 +79,11 @@
     "multi-agent-systems-techniques",
     "multiagent-systems-algorithms",
     "multiagent-systems-research"
+  ],
+  "what is dense and sparse retrieval?": [
+    "What is dense and sparse retrieval?",
+    "dense retrieval vs sparse retrieval",
+    "sparse vector space model",
+    "embedding similarity search"
   ]
 }

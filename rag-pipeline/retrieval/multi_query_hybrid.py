@@ -25,7 +25,7 @@ from caching.retrieval_cache import RetrievalCache
 
 
 class MultiQueryHybridRetriever:
-    def __init__(self, index_path=None, model_name="qwen2.5:3b", client=None):
+    def __init__(self, index_path=None, model_name="qwen2.5:7b", client=None):
         self.retriever = Retriever(index_path=index_path)
         self.query_generator = MultiQueryRetriever(
             model_name=model_name,

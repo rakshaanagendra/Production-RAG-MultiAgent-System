@@ -3,7 +3,7 @@ import ollama
 
 
 class QueryRewriter:
-    def __init__(self, model_name="qwen2.5:3b", client=None):
+    def __init__(self, model_name="qwen2.5:7b", client=None):
         self.model_name = model_name
         self.client = client
 
