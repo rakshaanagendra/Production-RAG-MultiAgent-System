@@ -78,5 +78,7 @@ scripts/crawl_docs.py
 
 evaluation/
 
+commands.txt
+
 #Note: `rag/` and `rag-pipeline/Lib`, `rag-pipeline/Scripts`, and related 
 #venv files are local environment artifacts and should not be pushed.
