@@ -36,13 +36,13 @@ Built in phases, this system progressively adds the engineering layers that make
 ┌─────────────────────────────────────────────────────────────────┐
 │                     MULTI-AGENT LAYER                           │
 │                                                                 │
-│   ┌─────────────────┐   ┌─────────────────┐   ┌─────────────┐  │
-│   │  Research Node  │──▶│   Writer Node   │──▶│ Critic Node │  │
-│   │  (ReAct Agent)  │   │  tone routing   │   │ LLM-as-judge│  │
-│   │                 │   │  hard gates     │   │ grounding   │  │
-│   │  rag_search     │   │                 │   │ check       │  │
-│   │  web_search     │   │                 │   │             │  │
-│   └────────┬────────┘   └─────────────────┘   └─────────────┘  │
+│   ┌─────────────────┐   ┌─────────────────┐   ┌─────────────┐   │
+│   │  Research Node  │──▶│   Writer Node   ──▶│ Critic Node │   │
+│   │  (ReAct Agent)  │   │  (Qwen2.5:7b)   │   │ (llama3.1)  │   │
+│   │                 │   │  tone routing   │   │ LLM-as-judge│   │
+│   │  rag_search     │   │  hard gates     │   │ grounding   │   │
+│   │  web_search     │   │                 │   │ check       │   │
+│   └────────┬────────┘   └─────────────────┘   └─────────────┘   │
 │            │       MultiAgentState (shared)                     │
 └────────────┼────────────────────────────────────────────────────┘
              │
