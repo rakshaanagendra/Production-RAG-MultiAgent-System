@@ -13,17 +13,23 @@ except ImportError:
     from loader import load_documents # pyright: ignore[reportMissingImports]
     from chunker import chunk_documents # pyright: ignore[reportMissingImports]
 
-model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+_model = None
+
+def _get_model():
+    global _model
+    if _model is None:
+        _model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+    return _model
 
 def embed_chunks(chunks):
+    model = _get_model()
     texts = [chunk["text"] for chunk in chunks]
     embeddings = model.encode(
-        texts, 
+        texts,
         batch_size=32,
-        show_progress_bar=True, 
+        show_progress_bar=True,
         normalize_embeddings=True
-        )
-
+    )
     return embeddings
 
 

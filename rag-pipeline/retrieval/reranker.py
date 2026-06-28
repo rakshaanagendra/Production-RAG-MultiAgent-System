@@ -5,8 +5,13 @@ from collections import Counter
 
 class Reranker:
     def __init__(self, model_name="BAAI/bge-reranker-base"):
-        # Load CrossEncoder model
-        self.model = CrossEncoder(model_name)
+        self.model_name = model_name
+        self._model = None
+
+    def _get_model(self):
+        if self._model is None:
+            self._model = CrossEncoder(self.model_name)
+        return self._model
 
     def rerank(self, query, retrieved_chunks, top_k=5, threshold_ratio=0.05):
         """
@@ -25,7 +30,7 @@ class Reranker:
         pairs = [(query, chunk["text"]) for chunk in retrieved_chunks]
 
         # Step 2: Get relevance scores
-        scores = self.model.predict(pairs)
+        scores = self._get_model().predict(pairs)
 
         # Step 3: Attach scores to chunks
         for chunk, score in zip(retrieved_chunks, scores):
@@ -167,4 +172,4 @@ if __name__ == "__main__":
     Illia Polosukhin
     """
 
-    print(reranker.model.predict([(query, chunk)]))
+    print(reranker._get_model().predict([(query, chunk)]))
