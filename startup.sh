@@ -7,7 +7,7 @@ from huggingface_hub import snapshot_download
 import os
 
 snapshot_download(
-    repo_id="rakshaanagendra/rag-index-data",
+    repo_id="rakshanagendra/rag-index-data",
     repo_type="dataset",
     local_dir="data/processed",
     token=os.environ.get("HF_TOKEN")
