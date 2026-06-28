@@ -20,9 +20,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy entire project into container
 COPY . .
 
-# Make startup script executable
-RUN chmod +x startup.sh
+# Download FAISS index data at build time
+ARG HF_TOKEN
+RUN python - <<EOF
+from huggingface_hub import snapshot_download
+import os
+snapshot_download(
+    repo_id="rakshanagendra/rag-index-data",
+    repo_type="dataset",
+    local_dir="data/processed",
+    token=os.environ.get("HF_TOKEN", "$HF_TOKEN")
+)
+print("Data downloaded successfully.")
+EOF
 
 EXPOSE 8000
 
-CMD ["./startup.sh"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
