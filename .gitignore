@@ -80,5 +80,10 @@ evaluation/
 
 commands.txt
 
+mlflow.db
+
+test_langsmith.py
+test_mcp.py
+
 #Note: `rag/` and `rag-pipeline/Lib`, `rag-pipeline/Scripts`, and related 
 #venv files are local environment artifacts and should not be pushed.

@@ -3,8 +3,11 @@ import sys
 import re
 import time
 from pathlib import Path
+from typing import Optional
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
+from langsmith import traceable
+from langchain_core.runnables import RunnableConfig
 
 # -----------------------------------------------------------------------
 # Path setup
@@ -47,17 +50,28 @@ Rules:
     "final_answer": "your answer here. End with: Note: Retrieved context had medium/low confidence."
 }"""
 
+STREAMING_WRITER_SYSTEM_PROMPT = """You are a research writer. Write a clear, accurate answer 
+to the query using only the provided research context.
+
+Rules:
+1. Only use information from the provided context — do not add outside knowledge
+2. Cite sources by filename where relevant
+3. If context confidence is medium or low, end with: Note: Retrieved context had medium/low confidence.
+4. Write the answer directly as plain text — no JSON, no formatting, no preamble"""
+
 # -----------------------------------------------------------------------
 # Writer Node
 # -----------------------------------------------------------------------
-def writer_node(state: MultiAgentState) -> dict:
-    """
-    Generates a final answer from research context.
-    Hard gates on answerable, context, and action.
-    Tone determined by action field.
-    Records its own latency into node_latencies.
-    """
-    # ADDED: start timer before any work begins
+@traceable(
+    name="writer_node",
+    metadata={"node_type": "generation"}
+)
+def writer_node(state: MultiAgentState, config: Optional[RunnableConfig] = None) -> dict:
+    # Read stream_mode from config if provided
+    stream_mode = False
+    if config:
+        stream_mode = config.get("configurable", {}).get("stream_mode", False)
+    
     node_start = time.time()
 
     query = state["query"]
@@ -66,7 +80,7 @@ def writer_node(state: MultiAgentState) -> dict:
     action = state.get("action", "retry_or_abstain")
     sources = state.get("sources", [])
 
-    # Hard gates — record latency even on early exits
+    # Hard gates — unchanged
     if not answerable:
         node_latency_ms = round((time.time() - node_start) * 1000, 2)
         return {
@@ -91,12 +105,6 @@ def writer_node(state: MultiAgentState) -> dict:
             "agent_log": [f"[WriterAgent] Skipped — action is retry_or_abstain | Latency: {node_latency_ms}ms"]
         }
 
-    system_prompt = (
-        CAUTIOUS_WRITER_SYSTEM_PROMPT
-        if action == "generate_cautiously"
-        else WRITER_SYSTEM_PROMPT
-    )
-
     human_message = f"""Query: {query}
 
 Research Context:
@@ -106,6 +114,35 @@ Sources available: {sources}
 
 Write your answer now."""
 
+    # -----------------------------------------------------------
+    # Streaming branch — plain text prompt, no JSON parsing needed
+    # Used when called from /stream endpoint
+    # -----------------------------------------------------------
+    if stream_mode:
+        messages = [
+            SystemMessage(content=STREAMING_WRITER_SYSTEM_PROMPT),
+            HumanMessage(content=human_message)
+        ]
+        response = llm.invoke(messages)
+        content = response.content
+        final_answer = (content if isinstance(content, str) else str(content)).strip()
+        node_latency_ms = round((time.time() - node_start) * 1000, 2)
+        return {
+            "final_answer": final_answer,
+            "node_latencies": {"writer_node": node_latency_ms},
+            "agent_log": [f"[WriterAgent] Stream mode | Action: {action} | Latency: {node_latency_ms}ms"]
+        }
+
+    # -----------------------------------------------------------
+    # Standard branch — JSON prompt, existing behavior unchanged
+    # Used when called from /query endpoint via graph.invoke()
+    # -----------------------------------------------------------
+    system_prompt = (
+        CAUTIOUS_WRITER_SYSTEM_PROMPT
+        if action == "generate_cautiously"
+        else WRITER_SYSTEM_PROMPT
+    )
+
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_message)
@@ -114,7 +151,6 @@ Write your answer now."""
     response = llm.invoke(messages)
     content = response.content
     raw = (content if isinstance(content, str) else str(content)).strip()
-
     clean = raw.replace("```json", "").replace("```", "").strip()
     clean = re.sub(r'[\n\r\t]', ' ', clean)
 
@@ -126,7 +162,6 @@ Write your answer now."""
         print(f"RAW OUTPUT: {repr(raw)}")
         final_answer = raw
 
-    # ADDED: stop timer after LLM call completes
     node_latency_ms = round((time.time() - node_start) * 1000, 2)
 
     log_entry = (
@@ -142,7 +177,6 @@ Write your answer now."""
         "node_latencies": {"writer_node": node_latency_ms},
         "agent_log": [log_entry]
     }
-
 
 # -----------------------------------------------------------------------
 # Test
